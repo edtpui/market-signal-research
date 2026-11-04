@@ -1,0 +1,5 @@
+# LF everywhere, whatever core.autocrlf says: source hashes (experiment manifests, the export pin and so the
+# ptrade model_id) must not depend on the checkout.
+* text=auto eol=lf
+*.png binary
+*.ico binary
