@@ -35,13 +35,23 @@ sha256 and a new ptrade `model_id`, which means a new registration and a new clo
 
 ## Applying a bundle (operator, after explicit approval)
 Each deployment writes `var/forward/exports/<book>/`. Its `OPERATOR.md` has the exact steps:
-1. Copy the plug-in, `models/strategy_lab/` and the protocol stub.
+1. Copy the plug-in, `models/strategy_lab/`, the protocol and `scripts/strategy_lab_job.py`.
 2. Add `[paths] ledger_strategy_lab` to settings.toml **before** the books.toml entry. books.toml validation fails
    on an unknown ledger key, and that would stop every book.
 3. Append the books entry.
 4. Confirm the model id: `python -m ptrade.new_model --model-id <book>`.
 5. Pre-register: `python -m baskets.register --ledger data/ledger_strategy_lab.db --books <book>`.
-6. Schedule `python -m baskets.run --ledger data/ledger_strategy_lab.db`.
+6. Schedule `python scripts/strategy_lab_job.py` as its own Task Scheduler task after the daily job. It applies the
+   daily job's basket-step guard (no run until the price store has asof's bar), then `baskets.job.step` (timeout,
+   error parsing, ledger backup) on the Strategy Lab ledger. The daily job itself is unchanged
+   (`paper/templates/strategy_lab_job.py`; tests run it against stubs of the ptrade modules it imports).
+
+A bundle is deterministic and LF only. The same spec and pinned code always give the same files and the same
+model_id: there is no timestamp in the plug-in, and pinned copies are written with LF whatever the checkout's line
+endings (`.gitattributes` keeps the repo LF too). Line endings and the export time used to leak into the pin and the
+plug-in sha256, so the same commit could give different model_ids (found and fixed 2026-11-04, before any bundle was
+applied). `ForwardService.reexport(id)` rebuilds an exported, not yet applied, ptrade deployment with the current
+code; after registration a code change is a new book.
 
 A separate ledger is required. The basket candidate table has no producer column, and its rows feed every book of
 the ledger, so a Strategy Lab producer must never write into `ledger_baskets.db`.
@@ -51,7 +61,8 @@ the ledger, so a Strategy Lab producer must never write into `ledger_baskets.db`
   has not run inside ptrade's Linux Python 3.12 venv.
 - API v1 serving a book whose ledger key is `ledger_strategy_lab` is inferred from `ptrade/bookdata.py`, not
   observed.
-- The daily job runs only the default basket ledger; the Strategy Lab ledger needs its own schedule entry.
+- The daily job runs only the default basket ledger; the Strategy Lab ledger needs its own schedule entry. Its
+  alerts and heartbeat don't cover that run: its status is one JSON line per run in `logs/strategy_lab_job.out`.
 - ptrade's price store and the research downloads can differ (restatements, re-adjustments), so forward results
   versus Strategy Lab backtests can differ for data reasons. `reconcile` reports this; it does not hide it.
 

@@ -16,6 +16,7 @@ import hashlib
 import json
 import sqlite3
 import threading
+from pathlib import Path
 
 import pandas as pd
 
@@ -173,6 +174,30 @@ class ForwardService:
             out = self.get(dep_id)
             out["created"] = True
             return out
+
+    def reexport(self, deployment_id: str) -> dict:
+        """Rebuilds an exported ptrade deployment's bundle with the current code: the same spec and book id, a new pin
+        and model_id when the pinned code changed. Only for target ptrade with status exported, i.e. a bundle ptrade
+        has not been told about by Strategy Lab; re-export before applying it, never after registration (OPERATOR.md
+        says a changed engine is a new registration). A mock deployment's host already runs its bundle."""
+        with self._lock:
+            d = self.get(deployment_id)
+            if d["target"] != "ptrade" or d["status"] != "exported":
+                raise DeployError([f"{deployment_id} is {d['target']}/{d['status']}: only an exported ptrade "
+                                   "deployment can be re-exported"])
+            spec = DeploymentSpec.model_validate(d["spec"])
+            v = self.validate(spec)
+            if not v["ok"]:
+                raise DeployError(v["problems"])
+            cls = self.lab.registry.get(spec.strategy, spec.strategy_version)
+            manifest = X.build(spec, cls, Path(d["bundle_dir"]), v)
+            with self._conn() as c:
+                c.execute("UPDATE deployments SET model_id=? WHERE deployment_id=?",
+                          (manifest["model_id"], deployment_id))
+                self._log(c, deployment_id, "info", "re-exported",
+                          dict(old_model_id=d["model_id"], model_id=manifest["model_id"],
+                               pin_sha256=manifest["pin_sha256"], warnings=v["warnings"]))
+            return self.get(deployment_id)
 
     def spec_from_experiment(self, run_id: str, start_date, name: str = "") -> DeploymentSpec:
         cfg: ExperimentConfig = self.lab.experiments.config(run_id)

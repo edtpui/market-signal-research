@@ -59,6 +59,103 @@ def test_bundle_layout_pin_and_import_safety(lab):
         lab.forward.set_status(d["deployment_id"], "paused", "x")
 
 
+def test_bundle_is_lf_only_whatever_the_checkout(lab):
+    """ptrade runs on Linux and every sha256 in the bundle feeds the model_id, so a CRLF checkout (a user strategy
+    here) must give the same LF bundle."""
+    user = Path(lab.settings.user_strategies_dir)
+    user.mkdir(parents=True, exist_ok=True)
+    src = (Path(__file__).resolve().parents[1] / "strategies_user" / "inverse_vol.py").read_bytes()
+    assert b"\r" not in src
+    (user / "inverse_vol.py").write_bytes(src.replace(b"\n", b"\r\n"))
+    lab.registry.load_dir(user)
+    d = lab.forward.deploy(spec(strategy="inverse_vol", strategy_version=lab.registry.get("inverse_vol").version,
+                                params={}), target="ptrade")
+    b = Path(d["bundle_dir"])
+    files = [p for p in b.rglob("*") if p.is_file()]
+    assert files and not [p for p in files if b"\r" in p.read_bytes()]
+    pinned = b / "models" / "strategy_lab" / "user" / "inverse_vol.py"
+    assert pinned.read_bytes() == src
+    pin = json.loads((b / "models" / "strategy_lab" / "PIN.json").read_text())
+    import hashlib
+    assert pin["files"]["user/inverse_vol.py"] == hashlib.sha256(src).hexdigest()
+
+
+def test_reexport_rebuilds_an_exported_ptrade_bundle_only(lab, monkeypatch):
+    import datetime
+    import types
+    from strategy_lab.paper import export as X
+    d = lab.forward.deploy(spec(), target="ptrade")
+    b = Path(d["bundle_dir"])
+    (b / "stale.txt").write_text("left from an older export")
+
+    class Later(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.datetime(2031, 6, 1, 12, 0, tzinfo=tz)
+
+    monkeypatch.setattr(X, "dt", types.SimpleNamespace(datetime=Later, timezone=datetime.timezone))
+    r = lab.forward.reexport(d["deployment_id"])
+    assert r["book_id"] == d["book_id"] and r["model_id"] == d["model_id"]      # same code, later: same model_id
+    assert json.loads((b / "MANIFEST.json").read_text())["created_utc"].startswith("2031-06-01")
+    assert not (b / "stale.txt").exists()
+    man = json.loads((b / "MANIFEST.json").read_text())
+    assert man["model_id"] == r["model_id"] and man["deployment_key"] == spec().key()
+    m = lab.forward.deploy(spec(start_date="2023-01-04"), target="mock")
+    with pytest.raises(DeployError, match="only an exported ptrade"):
+        lab.forward.reexport(m["deployment_id"])
+
+
+JOB_STUBS = {        # the ptrade modules scripts/strategy_lab_job.py imports, reduced to what it uses
+    "baskets/__init__.py": "",
+    "baskets/job.py": textwrap.dedent("""\
+        import os
+        def registered(p):
+            return os.environ.get("REG") == "1"
+        def step(asof, prices_db, ledger_path, alert):
+            if os.environ.get("BOOM"):
+                raise RuntimeError("boom")
+            alert("WARN", "stub warn")
+            return dict(status=os.environ.get("STATUS", "ok"), sessions=[asof], books={}, errors=[])
+        """),
+    "ptrade/__init__.py": "",
+    "ptrade/ops.py": "def last_completed_session():\n    return '2026-11-04'\n",
+    "ptrade/config.py": textwrap.dedent("""\
+        from pathlib import Path
+        R = Path(__file__).resolve().parents[1]
+        def resolve_path(k):
+            return {"prices": R / "data/prices.duckdb", "ledger_strategy_lab": R / "data/ledger_strategy_lab.db"}[k]
+        """),
+}
+
+
+@pytest.mark.parametrize("env,args,status,code", [
+    ({"REG": "1"}, [], "skipped", 0),                    # the price store ends 2026-11-03, asof is 2026-11-04
+    ({"REG": "1"}, ["2026-11-03"], "ok", 0),
+    ({"REG": "0"}, [], "ok", 0),                         # nothing registered: step decides (ptrade returns idle)
+    ({"REG": "1", "STATUS": "error"}, ["2026-11-03"], "error", 1),
+    ({"REG": "1", "BOOM": "1"}, ["2026-11-03"], "error", 1),
+])
+def test_bundled_job_script_guards_like_the_daily_job(lab, tmp_path, env, args, status, code):
+    import duckdb
+    d = lab.forward.deploy(spec(), target="ptrade")
+    root = tmp_path / "pt"
+    for rel, src in JOB_STUBS.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(src)
+    (root / "data").mkdir()
+    (root / "scripts").mkdir()
+    job = root / "scripts" / "strategy_lab_job.py"
+    job.write_bytes((Path(d["bundle_dir"]) / "scripts" / "strategy_lab_job.py").read_bytes())
+    con = duckdb.connect(str(root / "data" / "prices.duckdb"))
+    con.execute("CREATE TABLE prices AS SELECT DATE '2026-11-03' AS date")
+    con.close()
+    r = subprocess.run([sys.executable, "-B", str(job), *args], capture_output=True, text=True, cwd=root,
+                       env={**os.environ, **env}, timeout=120)
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert (r.returncode, out["status"]) == (code, status), r.stderr
+    assert out["asof"] == (args[0] if args else "2026-11-04")
+
+
 def test_tampered_pin_is_refused(lab, tmp_path):
     d = lab.forward.deploy(spec(), target="ptrade")
     b = Path(d["bundle_dir"])
