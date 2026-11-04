@@ -55,6 +55,18 @@ class Settings:
         return self.resolve(d) if d else self.experiments_dir.parent / "signal_research"
 
     @property
+    def entry_exit_dir(self) -> Path:
+        """Entry-exit research experiments; by default next to the backtest experiments directory."""
+        d = self.section("entry_exit").get("dir")
+        return self.resolve(d) if d else self.experiments_dir.parent / "entry_exit"
+
+    @property
+    def entry_exit_imports_dir(self) -> Path:
+        """Generated strategy modules of entry-exit cells imported into the Strategy Library."""
+        d = self.section("entry_exit").get("imports_dir")
+        return self.resolve(d) if d else self.experiments_dir.parent / "entry_exit_imports"
+
+    @property
     def signal_imports_dir(self) -> Path:
         """Generated strategy modules of researched signals imported into the Strategy Library."""
         d = self.section("signal_research").get("imports_dir")

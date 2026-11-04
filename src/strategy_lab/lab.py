@@ -46,6 +46,16 @@ class Lab:
         self._import_lock = threading.Lock()
         self.registry.load_dir(s.signal_imports_dir)
 
+        # Entry-Exit Research Lab: the exit library, pairing experiments, and imported entry-exit systems
+        from strategy_lab.entryexit.components import default_exit_registry
+        from strategy_lab.entryexit.store import EntryExitStore
+        ee = s.section("entry_exit")
+        self.exits = default_exit_registry()
+        self.entry_exit = EntryExitStore(s.entry_exit_dir, s.catalog_path, self, workers=int(ee.get("workers", 1)))
+        self.settings_ee_imports_dir = s.entry_exit_imports_dir
+        self.registry.load_module("strategy_lab.strategies.entry_exit")
+        self.registry.load_dir(s.entry_exit_imports_dir)
+
     def resolve(self, cfg: ExperimentConfig):
         return resolve(cfg, self.store, self.registry, self.universes, self.policy)
 
@@ -56,9 +66,14 @@ class Lab:
         from strategy_lab.research.imports import import_signal
         return import_signal(self, experiment_id, signal_key, name, defaults)
 
+    def import_entry_exit(self, experiment_id: str, cell: str, name: str = "") -> dict:
+        from strategy_lab.entryexit.imports import import_cell
+        return import_cell(self, experiment_id, cell, name)
+
     def close(self) -> None:
         self.jobs.shutdown()
         self.research.shutdown()
+        self.entry_exit.shutdown()
 
 
 def default_lab(path: str | Path | None = None) -> Lab:

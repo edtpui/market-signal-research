@@ -31,6 +31,7 @@ export type Route =
   | { page: "overview" }
   | { page: "strategies"; id?: string }
   | { page: "signals"; view: SignalView; id?: string; key?: string }
+  | { page: "entryexit"; view: EEView; id?: string; cell?: string }
   | { page: "backtest" }
   | { page: "run"; id: string }
   | { page: "forward"; id?: string }
@@ -41,6 +42,7 @@ export type Route =
   | { page: "missing"; path: string };
 
 export type SignalView = "library" | "signal" | "new" | "rankings" | "history" | "experiment" | "result";
+export type EEView = "library" | "new" | "leaderboards" | "history" | "experiment" | "cell";
 
 export function match(path: string): Route {
   const p = path.replace(/\/+$/, "") || "/";
@@ -55,6 +57,14 @@ export function match(path: string): Route {
   if (sm) return { page: "signals", view: "result", id: decodeURIComponent(sm[1]), key: decodeURIComponent(sm[2]) };
   sm = /^\/signals\/experiments\/([^/]+)$/.exec(p);
   if (sm) return { page: "signals", view: "experiment", id: decodeURIComponent(sm[1]) };
+  if (p === "/entry-exit") return { page: "entryexit", view: "library" };
+  if (p === "/entry-exit/new") return { page: "entryexit", view: "new" };
+  if (p === "/entry-exit/leaderboards") return { page: "entryexit", view: "leaderboards" };
+  if (p === "/entry-exit/history") return { page: "entryexit", view: "history" };
+  sm = /^\/entry-exit\/experiments\/([^/]+)\/cells\/([^/]+)$/.exec(p);
+  if (sm) return { page: "entryexit", view: "cell", id: decodeURIComponent(sm[1]), cell: decodeURIComponent(sm[2]) };
+  sm = /^\/entry-exit\/experiments\/([^/]+)$/.exec(p);
+  if (sm) return { page: "entryexit", view: "experiment", id: decodeURIComponent(sm[1]) };
   let m = /^\/strategies(?:\/([^/]+))?$/.exec(p);
   if (m) return { page: "strategies", id: m[1] ? decodeURIComponent(m[1]) : undefined };
   if (p === "/backtest") return { page: "backtest" };

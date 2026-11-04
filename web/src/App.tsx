@@ -2,6 +2,7 @@ import { AppShell } from "@/components/AppShell";
 import { Empty } from "@/components/common";
 import { Link, match, useLocation } from "@/lib/router";
 import { AnalyticsPage } from "@/pages/Analytics";
+import { EntryExitPage } from "@/pages/entryexit/EntryExitPage";
 import { BacktestPage } from "@/pages/Backtest";
 import { ExperimentsPage } from "@/pages/Experiments";
 import { ForwardPage } from "@/pages/Forward";
@@ -20,6 +21,7 @@ export function App() {
       {route.page === "overview" && <OverviewPage />}
       {route.page === "strategies" && <StrategiesPage id={route.id} />}
       {route.page === "signals" && <SignalsPage route={route} />}
+      {route.page === "entryexit" && <EntryExitPage route={route} />}
       {route.page === "backtest" && <BacktestPage />}
       {route.page === "run" && <RunPage key={route.id} id={route.id} />}
       {route.page === "forward" && <ForwardPage id={route.id} />}

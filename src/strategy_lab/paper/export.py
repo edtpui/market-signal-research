@@ -26,7 +26,8 @@ from strategy_lab.core.strategy import canonical_hash
 from strategy_lab.paper.spec import DeploymentSpec
 
 PINNED = ("__init__.py", "core/__init__.py", "core/market.py", "core/strategy.py", "core/types.py",
-          "engine/__init__.py", "engine/broker.py", "engine/config.py", "engine/portfolio.py", "engine/runner.py",
+          "engine/__init__.py", "engine/broker.py", "engine/config.py", "engine/fills.py", "engine/portfolio.py",
+          "engine/runner.py",
           "strategies/__init__.py", "strategies/basic.py", "strategies/ml.py", "strategies/registry.py",
           "paper/__init__.py", "paper/contract.py", "paper/plugin.py", "paper/spec.py")
 LEDGER_KEY = "ledger_strategy_lab"

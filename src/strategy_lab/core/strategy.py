@@ -1,8 +1,9 @@
 """The strategy interface. A strategy never knows whether it runs in a backtest or forward on the paper host: both
 drive it through engine.runner.StrategyRunner with the same context.
 
-Lifecycle: __init__(params) -> initialize(ctx) once -> each session after its close: on_order_event(ctx, e) for the
-session's order events, then on_bar(ctx) -> intents -> shutdown(ctx) once at the end of the run.
+Lifecycle: __init__(params) -> precompute(data) once (optional) -> initialize(ctx) once -> each session after its
+close: on_order_event(ctx, e) for the session's order events, then on_bar(ctx) -> intents -> shutdown(ctx) once at
+the end of the run.
 """
 from __future__ import annotations
 
@@ -85,6 +86,7 @@ class ExecutionInfo:
     fill_timing: str
     session_index: int
     sessions_run: int
+    fractional_shares: bool = False
 
 
 @dataclass
@@ -152,6 +154,14 @@ class Strategy(ABC):
     def warmup(self) -> int:
         """Bars of history needed; override when it depends on params."""
         return int(self.warmup_bars)
+
+    def precompute(self, data) -> Mapping[str, pd.DataFrame] | None:
+        """Optional: series computed once over the loaded window (MarketData), visible to on_bar only up to the
+        current session (ctx.market.derived / derived_now). Every value at row t must depend only on rows <= t:
+        the runner can verify this by recomputing on truncated data (engine.runner.verify_precompute, done by every
+        backtest of a strategy that overrides this). A forward host passes data that ends at its asof anyway.
+        Return frames indexed exactly like the data's session index."""
+        return None
 
     def initialize(self, ctx: InitContext) -> None:
         """Called once before the first session."""

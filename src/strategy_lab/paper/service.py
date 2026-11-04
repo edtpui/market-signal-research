@@ -107,6 +107,8 @@ class ForwardService:
             cls.resolve_params(spec.params)
         except Exception as e:  # noqa: BLE001
             return dict(ok=False, problems=[str(e)], warnings=[])
+        if getattr(cls, "requires_historical_test", False):
+            problems += self._historical_test_problems(cls, spec, warnings)
         need = set(cls.required_fields) | spec.execution.needs_fields()
         if not need <= C.HOST_FIELDS:
             problems.append(f"needs bar fields {sorted(need - C.HOST_FIELDS)}; the ptrade host supplies only "
@@ -139,6 +141,31 @@ class ForwardService:
         warnings.append("the strategy's universe is today's list (survivorship bias)")
         return dict(ok=not problems, problems=problems, warnings=warnings,
                     strategy=dict(id=cls.id, version=cls.version, source_sha256=cls.source_sha256()))
+
+    def _historical_test_problems(self, cls, spec: DeploymentSpec, warnings: list[str]) -> list[str]:
+        """Strategies built in the research labs (requires_historical_test) are eligible for forward paper testing
+        only after a finished backtest of the same strategy version in the existing engine."""
+        if cls.id == "entry_exit_system":
+            return ["the generic entry_exit_system cannot be deployed: import the cell into the Strategy Library "
+                    "(Entry-Exit Research), backtest the imported strategy, then deploy it"]
+        runs = [r for r in self.lab.experiments.list(limit=5000)
+                if r["strategy"] == cls.id and r["strategy_version"] == cls.version and r["status"] == "done"]
+        if not runs:
+            return [f"{cls.id} {cls.version} has no finished historical backtest: run it in Backtesting first "
+                    "(every constructed strategy is tested in historical simulation before forward paper testing)"]
+        same = []
+        for r in runs:
+            try:
+                rc = self.lab.experiments.config(r["run_id"])
+            except Exception:  # noqa: BLE001 - an unreadable run does not count
+                continue
+            if cls.resolve_params(rc.params) == cls.resolve_params(spec.params) and sorted(rc.universe or []) == \
+                    sorted(spec.universe):
+                same.append(r["run_id"])
+        if not same:
+            warnings.append(f"the backtests of {cls.id} used other parameters or another universe than this "
+                            f"deployment ({len(runs)} run(s), e.g. {runs[0]['run_id']})")
+        return []
 
     # -- deployments --------------------------------------------------------------------------------------------
     def deploy(self, spec: DeploymentSpec, target: str = "mock", source_run_id: str | None = None) -> dict:

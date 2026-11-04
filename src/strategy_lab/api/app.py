@@ -431,6 +431,9 @@ def create_app(lab: Lab | None = None) -> FastAPI:
     from strategy_lab.api.signals import build_router
     lab.research.recover_interrupted()
     app.include_router(build_router(lab))
+    from strategy_lab.api.entry_exit import build_router as build_ee_router
+    lab.entry_exit.recover_interrupted()
+    app.include_router(build_ee_router(lab))
 
     # -- the mock host's read API (API v1 shapes, for HTTP-level checks) --------------------------------------------
     mock = APIRouter(prefix="/mock-ptrade/api/v1", tags=["mock ptrade (SIMULATED)"])

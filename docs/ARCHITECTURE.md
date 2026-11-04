@@ -176,3 +176,14 @@ policy, the catalog database and the run-store conventions, and it never simulat
 enters the Strategy Library as a generated strategy module (`strategies/signal_rule.py`) that the existing engine
 backtests and the existing forward adapter deploys (its export pins the signal package). Methodology, tests and
 limitations: `docs/SIGNAL_RESEARCH.md`.
+
+## 8. Entry-Exit Research Lab (2026-11-04)
+Pairs entry signals with exit plans and separates the contribution of each. `entryexit/` holds the exit library (57
+components in 6 families), exit plans with deterministic trigger semantics and a vectorized position runtime, a trade
+replay (every event an independent position, identical events for every exit, matched-random and random-date
+controls replayed with the same exit), the pairing engine (statistics, paired comparisons against a baseline exit,
+BH, walk-forward, parameter sensitivity) and its write-once store. Portfolio results come from the existing engine:
+`strategies/entry_exit.py` runs a pairing through `StrategyRunner`. The replay and the engine share the plan code and
+`engine/fills.py` (the broker's fill rules, now vectorized), and a test checks they agree trade by trade. Engine
+extensions: `AttachedExit` (stop/target legs active after the entry fill), `Strategy.precompute` with a causality
+check, `ExecutionInfo.fractional_shares`. Methodology and limitations: `docs/ENTRY_EXIT_RESEARCH.md`.

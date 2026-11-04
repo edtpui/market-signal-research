@@ -14,6 +14,7 @@ export const NAV = [
   { to: "/", label: "Overview", match: (p: string) => p === "/" },
   { to: "/strategies", label: "Strategy Library", match: (p: string) => p.startsWith("/strategies") },
   { to: "/signals", label: "Signal Research", match: (p: string) => p.startsWith("/signals") },
+  { to: "/entry-exit", label: "Entry-Exit Lab", match: (p: string) => p.startsWith("/entry-exit") },
   { to: "/backtest", label: "Backtesting", match: (p: string) => p.startsWith("/backtest") || p.startsWith("/runs/") },
   { to: "/forward", label: "Forward Testing", match: (p: string) => p.startsWith("/forward") },
   { to: "/analytics", label: "Performance Analytics", match: (p: string) => p.startsWith("/analytics") },

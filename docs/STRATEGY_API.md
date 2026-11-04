@@ -14,6 +14,7 @@ class MyStrategy(Strategy):
     def warmup(self) -> int:                   # history you need before deciding: declare all of it
         return self.params["lookback"]
 
+    def precompute(self, data): ...            # optional, once: causal series over the loaded window (see below)
     def initialize(self, ctx): ...             # once: ctx.universe, params, start, end, initial_capital, fields, state, rng
     def on_order_event(self, ctx, event): ...  # each order event (submitted, partial/filled, expired, rejected, cancelled)
     def on_bar(self, ctx):                     # after each close: return intents for the next session (or None)
@@ -28,6 +29,7 @@ class MyStrategy(Strategy):
   - `history(field, symbols, bars)`, `latest(field)`, `price(sym)`, `has_bar(sym)`, `bars_available(sym)`;
   - `at(field, sym, date)` and `window(start, end)` raise `LookaheadError` past now;
   - `past(k)` gives the view k sessions earlier.
+  - `derived(name, bars)` and `derived_now(name)`: the strategy's precomputed series, up to now only.
 - `ctx.portfolio`: a snapshot with `cash`, `equity`, `positions`, `weights()`.
 - `ctx.execution`: open orders, this session's events, the fill timing and the session index.
 - `ctx.state`: a JSON-serialisable dict, saved in the run as `state.json`. `ctx.rng` is seeded from the config.
@@ -39,6 +41,9 @@ class MyStrategy(Strategy):
 - `TargetWeights({sym: w})` rebalances to weights of equity at this close. Weights for symbols held but not listed
   are closed. The gross weight is capped by `max_gross_leverage`.
 - `CancelIntent(order_id)`.
+- `OrderIntent.market(sym, qty, attached=(AttachedExit(OrderType.STOP, 1.0, mult, add, tag), ...))`: exit legs created
+  when the entry fills, priced `mult x fill price + add`; with next-open fills they are evaluated on the rest of the
+  entry session after the fill, in the given order (stop first), then expire. Declare `stop`/`limit` in order_types.
 - Quantities are signed share counts, whole numbers unless `fractional_shares`.
 
 **Rules the engine enforces**
@@ -46,6 +51,10 @@ class MyStrategy(Strategy):
 - Fills happen at the next session (open or close), or when a limit or stop is reached.
 - Undeclared fields, order types, symbols outside the universe, and short weights from a long-only strategy are
   `StrategyError`s.
+
+**precompute(data)** returns frames indexed by the data's sessions, computed once; every row t must depend only on
+rows <= t. Backtests verify it (`engine.runner.verify_precompute` recomputes on truncated data and raises
+`LookaheadError` on a difference). A forward host passes data that ends at its asof.
 
 **Rules you must follow**
 - Everything that changes behaviour is a parameter.

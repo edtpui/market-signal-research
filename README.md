@@ -10,13 +10,15 @@ remains the forward execution authority; Strategy Lab exports to it and reads fr
 - Writing strategies: `docs/STRATEGY_API.md`
 - Metric definitions: `docs/METRICS.md`
 - Signal Research Lab (event studies against matched-random controls): `docs/SIGNAL_RESEARCH.md`
+- Entry-Exit Research Lab (entry signals x exit plans, random-entry controls, portfolio backtests):
+  `docs/ENTRY_EXIT_RESEARCH.md`
 
 ## Run
 Interpreter: `../paper_trading/.venv` (Python 3.14.7, numpy/pandas/duckdb/fastapi/pydantic/uvicorn already
 installed). Nothing is installed globally.
 
 ```
-bash scripts/run_tests.sh                       # 140 Python tests (synthetic fixtures; 3 read the workspace data read-only)
+bash scripts/run_tests.sh                       # 224 Python tests (synthetic fixtures; 3 read the workspace data read-only)
 cd web && npx vitest run && npx tsc -b && npx vite build   # UI tests, typecheck, build into web/dist
 bash scripts/sl.sh serve --port 8070            # API + UI at http://127.0.0.1:8070
 bash scripts/sl.sh ingest us_core               # cache a dataset (versioned Parquet snapshot)
@@ -24,6 +26,7 @@ bash scripts/sl.sh backtest config.json         # an ExperimentConfig file -> a 
 bash scripts/sl.sh reproduce RUN_ID             # re-run and compare artifact hashes
 bash scripts/sl.sh forward-advance --to 2025-06-30   # advance the SIMULATED paper host
 bash scripts/sl.sh check-contract               # ptrade contract drift (read-only)
+<python> scripts/ee_reference_experiment.py main  # the reference entry-exit experiment (us_core, ~1.5 h)
 ```
 Without bash: `<python> scripts/serve.py serve --port 8070`.
 
@@ -35,11 +38,13 @@ src/strategy_lab/         core (types, strategy API, market view) · engine (bro
 strategies_user/          custom strategies, discovered at startup
 src/strategy_lab/signals/  signal catalog (217 signals, 33 families), causal indicator cache, combinations
 src/strategy_lab/research/ event-study engine, matched-random / random-date / benchmark controls, statistics, store
-web/                      the UI (9 sections: Overview, Strategy Library, Signal Research, Backtesting, Forward
-                          Testing, Performance Analytics, Market Data, Experiment History, Settings)
+src/strategy_lab/entryexit/ exit library (57 components), exit plans, trade replay, pairing engine, store, imports
+web/                      the UI (10 sections: Overview, Strategy Library, Signal Research, Entry-Exit Lab,
+                          Backtesting, Forward Testing, Performance Analytics, Market Data, Experiment History, Settings)
 var/                      generated, gitignored: cache/ (datasets), experiments/ (read-only run dirs), catalog.db,
                           forward/ (deployments, mock host, export bundles), signal_research/ (read-only experiment
-                          dirs), signal_imports/ (generated strategy modules of imported signals)
+                          dirs), signal_imports/ (generated strategy modules of imported signals), entry_exit/
+                          (read-only entry-exit experiment dirs), entry_exit_imports/ (imported entry-exit systems)
 ```
 
 ## Guarantees and their tests
@@ -60,6 +65,11 @@ var/                      generated, gitignored: cache/ (datasets), experiments/
 | randomization test calibrated (random signals) and powerful (oracles); BH, bootstrap, verdicts | `tests/test_signal_research.py` |
 | append-only test ledger and locked results; failure isolation; cancellation; reproduction by content hash | `tests/test_signal_research.py` |
 | imported signal trades exactly the researched events; forward deploy pins the signal code | `tests/test_signal_research.py` |
+| one fill model for broker and replay; attached exits (stop-first on the entry bar); precompute causality check | `tests/test_entry_exit.py` |
+| every exit component is causal (poisoned future bars change no past series and no closed trade) | `test_no_exit_component_looks_ahead` |
+| trade replay == event-driven engine trade by trade (10 plans, missing bars, costs, partials) | `test_replay_matches_the_event_driven_engine` |
+| identical events for every exit of an entry; random entries calibrated, oracle detected; BH; walk-forward | `tests/test_entry_exit.py` |
+| imported entry-exit system needs a historical backtest before forward deploy; deploy pins the exit code | `test_import_backtest_and_forward_gate` |
 
 ## Data policy
 - Bars are loaded from 2018-01-01 (warm-up only), backtests start from 2019-01-01, and the hard ceiling is

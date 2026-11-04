@@ -39,6 +39,35 @@ class OrderStatus(str, Enum):
 
 
 @dataclass(frozen=True)
+class AttachedExit:
+    """An exit order attached to an entry order (a bracket leg). It is created when the entry fills, for `fraction`
+    of the filled quantity (opposite sign), at price = mult x the entry's fill price + add, so a stop or target set
+    relative to an entry price that is unknown at the decision close is exact.
+
+    With fill_timing next_open it is evaluated on the rest of the fill session, after the entry fill (the open), in
+    the order given (put the stop first: when a stop and a target are both reached in one bar the order of the
+    intrabar high and low is unknowable, and stop-first is the conservative assumption), and expires at that
+    session's close: from the close on the strategy places its own resting orders. With next_close the session is
+    over when the entry fills, so attached exits are dropped (an event says so)."""
+    order_type: OrderType
+    fraction: float = 1.0
+    mult: float = 1.0
+    add: float = 0.0
+    tag: str = ""
+
+    def __post_init__(self):
+        if self.order_type not in (OrderType.STOP, OrderType.LIMIT):
+            raise ValueError("an attached exit is a stop or a limit order")
+        if not (math.isfinite(self.fraction) and 0 < self.fraction <= 1):
+            raise ValueError(f"attached exit fraction must be in (0, 1], got {self.fraction}")
+        if not (math.isfinite(self.mult) and math.isfinite(self.add)):
+            raise ValueError("attached exit price terms must be finite")
+
+    def price(self, fill_price: float) -> float:
+        return self.mult * fill_price + self.add
+
+
+@dataclass(frozen=True)
 class OrderIntent:
     """A request for a share quantity. quantity is signed (buy > 0, sell < 0) and never zero."""
     symbol: str
@@ -48,6 +77,7 @@ class OrderIntent:
     stop_price: float | None = None
     tif: TimeInForce = TimeInForce.GTC
     tag: str = ""
+    attached: tuple[AttachedExit, ...] = ()
 
     def __post_init__(self):
         if not self.symbol:
@@ -58,12 +88,15 @@ class OrderIntent:
             raise ValueError(f"OrderIntent {self.symbol}: a limit order needs a positive limit_price")
         if self.order_type == OrderType.STOP and not _positive(self.stop_price):
             raise ValueError(f"OrderIntent {self.symbol}: a stop order needs a positive stop_price")
+        if any(not isinstance(a, AttachedExit) for a in self.attached):
+            raise ValueError(f"OrderIntent {self.symbol}: attached legs must be AttachedExit")
 
     @staticmethod
-    def market(symbol: str, quantity: float, tag: str = "", tif: TimeInForce = TimeInForce.DAY) -> "OrderIntent":
+    def market(symbol: str, quantity: float, tag: str = "", tif: TimeInForce = TimeInForce.DAY,
+               attached: tuple[AttachedExit, ...] = ()) -> "OrderIntent":
         """Default DAY: a market order whose next session has no bar is expired with a reason, never carried
         silently (the ptrade convention: a name without a valid open is passed over)."""
-        return OrderIntent(symbol, quantity, OrderType.MARKET, tif=tif, tag=tag)
+        return OrderIntent(symbol, quantity, OrderType.MARKET, tif=tif, tag=tag, attached=tuple(attached))
 
     @staticmethod
     def limit(symbol: str, quantity: float, price: float, tif: TimeInForce = TimeInForce.DAY,
@@ -114,6 +147,8 @@ class Order:
     avg_fill_price: float | None = None
     sessions_eligible: int = 0
     reason: str = ""
+    attached: tuple = ()               # AttachedExit legs, created when this order first fills
+    parent_id: str | None = None       # set on an attached exit: the entry order it belongs to
 
     @property
     def remaining(self) -> float:

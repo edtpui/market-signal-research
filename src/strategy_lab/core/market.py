@@ -79,14 +79,42 @@ class MarketData:
 
 
 class MarketView:
-    """The strategy's window onto MarketData at session position i (inclusive). Cheap to construct per session."""
+    """The strategy's window onto MarketData at session position i (inclusive). Cheap to construct per session.
 
-    def __init__(self, data: MarketData, i: int):
+    derived: the strategy's precomputed causal series (Strategy.precompute), name -> (frame, read-only array) aligned
+    to the session index; like the bars they are only visible up to and including session i."""
+
+    def __init__(self, data: MarketData, i: int, derived: dict | None = None):
         if not 0 <= i < len(data.index):
             raise IndexError(f"session position {i} outside 0..{len(data.index) - 1}")
         self._d = data
         self._i = i
+        self._derived = derived or {}
         self.timestamp: pd.Timestamp = data.index[i]
+
+    @property
+    def position(self) -> int:
+        """Integer position of the current session in the loaded window (for derived arrays)."""
+        return self._i
+
+    def derived(self, name: str, bars: int | None = None) -> pd.DataFrame:
+        """The last `bars` rows (all when None) of a precomputed series, up to and including now."""
+        try:
+            f = self._derived[name][0]
+        except KeyError:
+            raise KeyError(f"no precomputed series {name!r} (have {sorted(self._derived)})") from None
+        lo = 0 if bars is None else max(0, self._i + 1 - int(bars))
+        return f.iloc[lo: self._i + 1]
+
+    def derived_now(self, name: str) -> np.ndarray:
+        """Row i of a precomputed series as a read-only array (columns as precomputed)."""
+        try:
+            return self._derived[name][1][self._i]
+        except KeyError:
+            raise KeyError(f"no precomputed series {name!r} (have {sorted(self._derived)})") from None
+
+    def derived_columns(self, name: str) -> list:
+        return list(self._derived[name][0].columns)
 
     @property
     def symbols(self) -> tuple[str, ...]:
@@ -146,7 +174,7 @@ class MarketView:
         """The view as it was `sessions_ago` sessions earlier (for replaying warm-up history); never a later one."""
         if sessions_ago < 0:
             raise LookaheadError("a view of a later session is not available")
-        return MarketView(self._d, self._i - int(sessions_ago))
+        return MarketView(self._d, self._i - int(sessions_ago), self._derived)
 
     def window(self, start=None, end=None, name: str = "close") -> pd.DataFrame:
         if end is not None and pd.Timestamp(end) > self.timestamp:

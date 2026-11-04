@@ -76,7 +76,9 @@ export function StrategiesPage({ id }: { id?: string }) {
                     </table>
                   )}
                 </div>
-                {detail.data.provenance && <SignalProvenancePanel p={detail.data.provenance} />}
+                {detail.data.provenance?.signal && <SignalProvenancePanel p={detail.data.provenance} />}
+                {detail.data.category === "entry_exit" && (detail.data.provenance as unknown as EEProvenance | undefined)?.research?.cell &&
+                  <EEProvenancePanel p={detail.data.provenance as unknown as EEProvenance} />}
                 <details>
                   <summary className="cursor-pointer text-2xs font-semibold tracking-wide text-muted-foreground uppercase">Source</summary>
                   <pre className="num mt-1 max-h-[420px] overflow-auto rounded-md border bg-surface-2 p-2 text-[11px] leading-snug">{detail.data.code}</pre>
@@ -112,6 +114,45 @@ function SignalProvenancePanel({ p }: { p: SignalProvenance }) {
         <tbody>{rows.map((x) => (
           <tr key={x.partition} className="border-b last:border-0"><td className="py-0.5">{x.partition} <span className="text-muted-foreground">({x.role})</span></td><td className="num text-right">{fmt.int(x.n)}</td>
             <td className={`num text-right ${fmt.tone(x.excess_matched)}`}>{fmt.pct(x.excess_matched)}</td><td className="num text-right">{x.q_matched === null ? fmt.DASH : x.q_matched.toFixed(3)}</td><td className="pl-2">{x.verdict.replace("_", " ")}</td></tr>
+        ))}</tbody>
+      </table>
+    </div>
+  );
+}
+
+interface EEProvenance {
+  warning: string;
+  research: {
+    experiment_id: string; cell: string; entry_name: string; exit_name: string; trigger: string; dataset: string; dataset_version: string;
+    universe_name: string | null; n_symbols: number; start: string; end: string; methodology_hash: string; seed: number;
+    trade_level: Record<string, { role: string; n: number; mean_ret: number | null; excess_matched: number | null; q: number | null; verdict: string | null; expectancy_r: number | null }>;
+    portfolio: Record<string, { role: string; metrics: Record<string, number | null> }>;
+  };
+  validation: { test_evaluated: boolean };
+}
+
+// A system imported from the Entry-Exit Research Lab: its pairing, where it was researched and how it validated.
+function EEProvenancePanel({ p }: { p: EEProvenance }) {
+  const r = p.research;
+  return (
+    <div className="space-y-2 rounded-md border border-primary/30 p-2" data-provenance="entry-exit">
+      <div className="text-2xs font-semibold tracking-wide text-muted-foreground uppercase">Researched entry-exit system</div>
+      <div className="rounded border border-warn/50 bg-warn/10 px-2 py-1 text-xs text-warn">{p.warning}</div>
+      <KV rows={[
+        ["Entry", r.entry_name], ["Exit", <span>{r.exit_name}<div className="text-2xs text-muted-foreground">{r.trigger}</div></span>],
+        ["Source cell", <Link className="num text-primary hover:underline" to={`/entry-exit/experiments/${r.experiment_id}/cells/${r.cell}`}>{r.experiment_id} / {r.cell}</Link>],
+        ["Data", <span className="num">{r.dataset}@{r.dataset_version} · {r.universe_name ?? "custom"} ({r.n_symbols}) · {r.start} … {r.end}</span>],
+        ["Method", <span className="num">seed {r.seed} · methodology {r.methodology_hash.slice(0, 10)}</span>],
+        ["Test period", p.validation.test_evaluated ? "evaluated in the source experiment" : "locked, not evaluated"],
+        ["Forward eligibility", "needs a finished backtest of this strategy version (Backtesting) before deployment"],
+      ]} />
+      <table className="w-full text-xs">
+        <thead><tr className="border-b text-2xs text-muted-foreground"><th className="py-1 text-left font-medium">Partition</th><th className="text-right font-medium">trades</th><th className="text-right font-medium">mean</th><th className="text-right font-medium">excess vs random</th><th className="text-right font-medium">q</th><th className="text-right font-medium">Sharpe</th><th className="text-right font-medium">CAGR</th><th className="pl-2 text-left font-medium">Verdict</th></tr></thead>
+        <tbody>{Object.entries(r.trade_level).map(([k, x]) => (
+          <tr key={k} className="border-b last:border-0"><td className="py-0.5">{k} <span className="text-muted-foreground">({x.role})</span></td><td className="num text-right">{fmt.int(x.n)}</td>
+            <td className={`num text-right ${fmt.tone(x.mean_ret)}`}>{fmt.pct(x.mean_ret)}</td><td className={`num text-right ${fmt.tone(x.excess_matched)}`}>{fmt.pct(x.excess_matched)}</td>
+            <td className="num text-right">{x.q === null || x.q === undefined ? fmt.DASH : x.q.toFixed(3)}</td><td className="num text-right">{fmt.num(r.portfolio[k]?.metrics?.sharpe, 2)}</td>
+            <td className={`num text-right ${fmt.tone(r.portfolio[k]?.metrics?.cagr)}`}>{fmt.pct(r.portfolio[k]?.metrics?.cagr)}</td><td className="pl-2">{(x.verdict ?? "").replace("_", " ")}</td></tr>
         ))}</tbody>
       </table>
     </div>

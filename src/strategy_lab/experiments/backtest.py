@@ -13,7 +13,7 @@ from strategy_lab.analytics import metrics as mt
 from strategy_lab.core.market import MarketData
 from strategy_lab.data.policy import DataPolicy, period_labels
 from strategy_lab.data.store import FREQUENCIES, DataError, DataStore
-from strategy_lab.engine.runner import RunOutput, StrategyRunner
+from strategy_lab.engine.runner import RunOutput, StrategyRunner, overrides_precompute, verify_precompute
 from strategy_lab.experiments.config import ExperimentConfig
 from strategy_lab.strategies.registry import StrategyRegistry
 
@@ -101,6 +101,10 @@ def run_backtest(cfg: ExperimentConfig, store: DataStore, registry: StrategyRegi
                                   version=resolved.dataset_version, frequency=resolved.frequency,
                                   price_mode=resolved.execution.price_mode, warmup_bars=strategy.warmup())
     ppy = FREQUENCIES[resolved.frequency]
+    if overrides_precompute(cls):
+        # precomputed series are checked for look-ahead on this run's own data before they are used
+        first = int(data.index.searchsorted(pd.Timestamp(resolved.start)))
+        report["precompute_check"] = verify_precompute(lambda: cls(resolved.params), data, cuts=2, start_pos=first)
     runner = StrategyRunner(strategy, data, resolved.execution, resolved.initial_capital,
                             pd.Timestamp(resolved.start), pd.Timestamp(resolved.end), tuple(resolved.universe),
                             seed=resolved.seed, periods_per_year=ppy)

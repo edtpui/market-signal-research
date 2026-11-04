@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from strategy_lab.engine.fills import commission as _commission
+
 
 class CommissionConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -14,9 +16,7 @@ class CommissionConfig(BaseModel):
     minimum: float = Field(0.0, ge=0, description="minimum dollars per fill (applied when the sum is positive)")
 
     def cost(self, quantity: float, price: float) -> float:
-        q = abs(quantity)
-        c = self.per_order + self.per_share * q + q * price * self.bps / 1e4
-        return max(c, self.minimum) if c > 0 else 0.0
+        return float(_commission(self.per_order, self.per_share, self.bps, self.minimum, quantity, price))
 
 
 class SpreadConfig(BaseModel):

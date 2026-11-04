@@ -24,6 +24,14 @@ The pinned engine (`models/strategy_lab/PIN.json`) covers every module that deci
 every pinned file's sha256 before it runs. A Strategy Lab code change therefore makes a new pin, a new plug-in
 sha256 and a new ptrade `model_id`, which means a new registration and a new clock.
 
+## Strategies from the research labs
+An imported entry-exit system (`requires_historical_test`) is refused until a finished backtest of the same strategy
+version exists (Backtesting); a backtest with other parameters or universe passes with a warning. The generic
+`entry_exit_system` (JSON definition) cannot be deployed. Its export pins `strategies/entry_exit.py`, `entryexit/`
+and `signals/`. Only close-based plans (market orders, open/close bars, no benchmark) with open/close entries pass the
+checks below; plans with intrabar stops or targets are backtest-only. The pinned engine includes `engine/fills.py`
+(2026-11-04): a new export has a new pin and model_id; bundles already written keep their own pinned copies.
+
 ## What a ptrade deployment can and cannot do (checked at deploy, fail closed)
 - Frames carry **adjusted open and close only**: no high, low or volume. So a deployment allows market orders only,
   no limit/stop orders, no participation cap and no high-low spread model, and `price_mode` must be `adjusted`.
