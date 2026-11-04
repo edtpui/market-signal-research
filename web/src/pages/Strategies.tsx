@@ -1,13 +1,13 @@
 // Strategy Library: every registered strategy (built-in and strategies_user/), its versions, typed parameters,
 // data and order requirements, ptrade forward compatibility, and its source (whose sha256 every run records).
 import { useStrategies, useStrategy } from "@/api/hooks";
-import type { StrategyInfo } from "@/api/client";
+import type { SignalProvenance, StrategyInfo } from "@/api/client";
 import { DataTable, type Col } from "@/components/DataTable";
 import { Empty, ErrorState, KV, Loading, PageHeader, Panel } from "@/components/common";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import * as fmt from "@/lib/format";
-import { navigate } from "@/lib/router";
+import { Link, navigate } from "@/lib/router";
 
 export function ptradeCompatible(s: Pick<StrategyInfo, "required_fields" | "order_types" | "long_only">): { ok: boolean; why: string } {
   const extra = s.required_fields.filter((f) => !["open", "close"].includes(f));
@@ -76,6 +76,7 @@ export function StrategiesPage({ id }: { id?: string }) {
                     </table>
                   )}
                 </div>
+                {detail.data.provenance && <SignalProvenancePanel p={detail.data.provenance} />}
                 <details>
                   <summary className="cursor-pointer text-2xs font-semibold tracking-wide text-muted-foreground uppercase">Source</summary>
                   <pre className="num mt-1 max-h-[420px] overflow-auto rounded-md border bg-surface-2 p-2 text-[11px] leading-snug">{detail.data.code}</pre>
@@ -85,6 +86,34 @@ export function StrategiesPage({ id }: { id?: string }) {
           </Panel>
         )}
       </div>
+    </div>
+  );
+}
+
+// A strategy imported from Signal Research: the signal it trades, where it was researched and how it validated.
+function SignalProvenancePanel({ p }: { p: SignalProvenance }) {
+  const r = p.research;
+  const rows = r.results.filter((x) => x.horizon === r.primary_horizon);
+  return (
+    <div className="space-y-2 rounded-md border border-primary/30 p-2" data-provenance>
+      <div className="text-2xs font-semibold tracking-wide text-muted-foreground uppercase">Researched signal</div>
+      <div className="rounded border border-warn/50 bg-warn/10 px-2 py-1 text-xs text-warn">{p.warning}</div>
+      <KV rows={[
+        ["Signal", <span className="num">{p.signal.key} · {p.signal.direction}</span>],
+        ["Trigger", p.signal.trigger],
+        ["Parameters", <span className="num">{JSON.stringify(p.signal.params)}</span>],
+        ["Source experiment", <Link className="num text-primary hover:underline" to={`/signals/experiments/${r.experiment_id}/${encodeURIComponent(p.signal.key)}`}>{r.experiment_id}</Link>],
+        ["Data", <span className="num">{r.dataset}@{r.dataset_version} · {r.universe_name ?? "custom"} ({r.n_symbols}) · {r.start} … {r.end}</span>],
+        ["Method", <span className="num">{r.permutations} permutations · seed {r.seed} · methodology {r.methodology_hash.slice(0, 10)}</span>],
+        ["Test period", p.validation.test_evaluated ? (p.validation.test_evaluations.length ? p.validation.test_evaluations.map((t) => (t.first_use ? "locked result (first evaluation)" : `re-evaluation (locked: ${t.locked_experiment})`)).join("; ") : "evaluated") : "locked, not evaluated"],
+      ]} />
+      <table className="w-full text-xs">
+        <thead><tr className="border-b text-2xs text-muted-foreground"><th className="py-1 text-left font-medium">Partition ({r.primary_horizon} sessions)</th><th className="text-right font-medium">n</th><th className="text-right font-medium">Excess vs matched</th><th className="text-right font-medium">q</th><th className="pl-2 text-left font-medium">Verdict</th></tr></thead>
+        <tbody>{rows.map((x) => (
+          <tr key={x.partition} className="border-b last:border-0"><td className="py-0.5">{x.partition} <span className="text-muted-foreground">({x.role})</span></td><td className="num text-right">{fmt.int(x.n)}</td>
+            <td className={`num text-right ${fmt.tone(x.excess_matched)}`}>{fmt.pct(x.excess_matched)}</td><td className="num text-right">{x.q_matched === null ? fmt.DASH : x.q_matched.toFixed(3)}</td><td className="pl-2">{x.verdict.replace("_", " ")}</td></tr>
+        ))}</tbody>
+      </table>
     </div>
   );
 }

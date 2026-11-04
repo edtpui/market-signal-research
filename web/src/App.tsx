@@ -9,6 +9,7 @@ import { MarketDataPage } from "@/pages/MarketData";
 import { OverviewPage } from "@/pages/Overview";
 import { RunPage } from "@/pages/Run";
 import { SettingsPage } from "@/pages/Settings";
+import { SignalsPage } from "@/pages/signals/SignalsPage";
 import { StrategiesPage } from "@/pages/Strategies";
 
 export function App() {
@@ -18,6 +19,7 @@ export function App() {
     <AppShell>
       {route.page === "overview" && <OverviewPage />}
       {route.page === "strategies" && <StrategiesPage id={route.id} />}
+      {route.page === "signals" && <SignalsPage route={route} />}
       {route.page === "backtest" && <BacktestPage />}
       {route.page === "run" && <RunPage key={route.id} id={route.id} />}
       {route.page === "forward" && <ForwardPage id={route.id} />}

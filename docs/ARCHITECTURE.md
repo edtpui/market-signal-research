@@ -166,3 +166,13 @@ One module, used for backtests and forward deployments alike. Undefined is never
   six live books' inputs. See `docs/PTRADE_INTEGRATION.md`.
 - **Session calendar:** defined by a reference symbol (SPY) and not the union of dates. A union let DX-Y.NYB's bars
   on 2025-01-09 and 2025-05-26 (NYSE closed) give every stock two phantom missing sessions.
+
+## 7. Signal Research Lab (2026-11-04)
+A second research mode next to backtesting: event studies of individual signals against matched-random stocks,
+random entry dates and benchmarks, with chronological partitions, a locked test period and multiple-testing
+control. Signal definitions live in `signals/` (no execution logic); the vectorized engine, statistics and store in
+`research/`; routes in `api/signals.py`; pages under `web/src/pages/signals/`. It reuses the DataStore, the data
+policy, the catalog database and the run-store conventions, and it never simulates a portfolio: a researched signal
+enters the Strategy Library as a generated strategy module (`strategies/signal_rule.py`) that the existing engine
+backtests and the existing forward adapter deploys (its export pins the signal package). Methodology, tests and
+limitations: `docs/SIGNAL_RESEARCH.md`.

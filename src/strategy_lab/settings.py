@@ -48,6 +48,18 @@ class Settings:
     def user_strategies_dir(self) -> Path:
         return self.resolve(self.section("strategies").get("user_dir", "strategies_user"))
 
+    @property
+    def signal_research_dir(self) -> Path:
+        """Signal research experiments; by default next to the backtest experiments directory."""
+        d = self.section("signal_research").get("dir")
+        return self.resolve(d) if d else self.experiments_dir.parent / "signal_research"
+
+    @property
+    def signal_imports_dir(self) -> Path:
+        """Generated strategy modules of researched signals imported into the Strategy Library."""
+        d = self.section("signal_research").get("imports_dir")
+        return self.resolve(d) if d else self.experiments_dir.parent / "signal_imports"
+
 
 def load(path: str | Path | None = None) -> Settings:
     p = Path(path or os.environ.get("STRATEGY_LAB_SETTINGS") or DEFAULT_SETTINGS)

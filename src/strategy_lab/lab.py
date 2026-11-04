@@ -1,7 +1,8 @@
-"""The Lab: settings, data store, strategy registry, experiment store and forward service wired together once.
-The API, the CLI and the tests all go through it."""
+"""The Lab: settings, data store, strategy registry, experiment store, forward service and the Signal Research Lab
+wired together once. The API, the CLI and the tests all go through it."""
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 from strategy_lab import settings as settings_mod
@@ -29,14 +30,35 @@ class Lab:
         from strategy_lab.paper.service import ForwardService
         self.forward = ForwardService(self)
 
+        # Signal Research Lab: the signal catalog, reference data, the research store, and researched signals
+        # imported into the Strategy Library (generated modules, loaded like strategies_user/)
+        from strategy_lab.research.reference import ReferenceData
+        from strategy_lab.research.store import SignalResearchStore
+        from strategy_lab.signals.library import default_signal_registry
+        sr = s.section("signal_research")
+        self.signals = default_signal_registry()
+        self.reference = ReferenceData(sector_file=s.resolve(sr["sector_file"]) if sr.get("sector_file") else None,
+                                       market_cap_file=s.resolve(sr["market_cap_file"])
+                                       if sr.get("market_cap_file") else None)
+        self.research = SignalResearchStore(s.signal_research_dir, s.catalog_path, self,
+                                            workers=int(sr.get("workers", 1)))
+        self.settings_signal_imports_dir = s.signal_imports_dir
+        self._import_lock = threading.Lock()
+        self.registry.load_dir(s.signal_imports_dir)
+
     def resolve(self, cfg: ExperimentConfig):
         return resolve(cfg, self.store, self.registry, self.universes, self.policy)
 
     def backtest(self, cfg: ExperimentConfig, data=None) -> BacktestResult:
         return run_backtest(cfg, self.store, self.registry, self.universes, self.policy, data=data)
 
+    def import_signal(self, experiment_id: str, signal_key: str, name: str = "", defaults: dict | None = None) -> dict:
+        from strategy_lab.research.imports import import_signal
+        return import_signal(self, experiment_id, signal_key, name, defaults)
+
     def close(self) -> None:
         self.jobs.shutdown()
+        self.research.shutdown()
 
 
 def default_lab(path: str | Path | None = None) -> Lab:

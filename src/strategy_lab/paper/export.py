@@ -223,7 +223,10 @@ def build(spec: DeploymentSpec, strategy_cls, out_dir: Path, validation: dict) -
     pkg = Path(strategy_lab.__file__).resolve().parent
     pin_root = out_dir / "models" / "strategy_lab"
     files = {}
-    for rel in PINNED:
+    # a strategy may need package modules beyond the engine (an imported signal strategy: the signal catalog);
+    # they are pinned with it. For every other strategy pin_modules is empty and the pin is unchanged.
+    extra = tuple(r for r in getattr(strategy_cls, "pin_modules", ()) if r not in PINNED)
+    for rel in PINNED + extra:
         src = pkg / rel
         dst = pin_root / "strategy_lab" / rel
         dst.parent.mkdir(parents=True, exist_ok=True)

@@ -28,6 +28,17 @@ mock_dataset = "us_core"
 universe_file = ""
 contract_commit = "792758b"
 
+[signal_research]
+# Signal Research Lab (docs/SIGNAL_RESEARCH.md). Experiments and imported-signal strategy modules are generated
+# under var/. sector_file: ticker -> SEC SIC code (current, not point-in-time), mapped to approximate sectors for
+# sector matching and sector-ETF benchmarks. market_cap_file: a point-in-time CSV (ticker, date, market_cap); none
+# exists in this workspace, so market-cap matching is refused rather than approximated.
+dir = "var/signal_research"
+imports_dir = "var/signal_imports"
+sector_file = "../../data/sec_edgar/companies.csv"
+market_cap_file = ""
+workers = 1                    # experiments run one at a time; each runs its signals on its own `workers` threads
+
 [universes]
 sector_etfs = ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY"]
 index_etfs = ["SPY", "QQQ", "IWM", "IJH", "IJR"]

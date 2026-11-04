@@ -9,13 +9,14 @@ remains the forward execution authority; Strategy Lab exports to it and reads fr
 - Forward integration with ptrade: `docs/PTRADE_INTEGRATION.md`
 - Writing strategies: `docs/STRATEGY_API.md`
 - Metric definitions: `docs/METRICS.md`
+- Signal Research Lab (event studies against matched-random controls): `docs/SIGNAL_RESEARCH.md`
 
 ## Run
 Interpreter: `../paper_trading/.venv` (Python 3.14.7, numpy/pandas/duckdb/fastapi/pydantic/uvicorn already
 installed). Nothing is installed globally.
 
 ```
-bash scripts/run_tests.sh                       # 94 Python tests (synthetic fixtures; 3 read the workspace data read-only)
+bash scripts/run_tests.sh                       # 140 Python tests (synthetic fixtures; 3 read the workspace data read-only)
 cd web && npx vitest run && npx tsc -b && npx vite build   # UI tests, typecheck, build into web/dist
 bash scripts/sl.sh serve --port 8070            # API + UI at http://127.0.0.1:8070
 bash scripts/sl.sh ingest us_core               # cache a dataset (versioned Parquet snapshot)
@@ -32,10 +33,13 @@ config/settings.toml      data policy, datasets, universes, storage, forward hos
 src/strategy_lab/         core (types, strategy API, market view) · engine (broker, portfolio, runner)
                           data (policy, providers, store) · analytics · experiments · strategies · paper · api
 strategies_user/          custom strategies, discovered at startup
-web/                      the UI (8 pages: Overview, Strategy Library, Backtesting, Forward Testing,
-                          Performance Analytics, Market Data, Experiment History, Settings)
+src/strategy_lab/signals/  signal catalog (217 signals, 33 families), causal indicator cache, combinations
+src/strategy_lab/research/ event-study engine, matched-random / random-date / benchmark controls, statistics, store
+web/                      the UI (9 sections: Overview, Strategy Library, Signal Research, Backtesting, Forward
+                          Testing, Performance Analytics, Market Data, Experiment History, Settings)
 var/                      generated, gitignored: cache/ (datasets), experiments/ (read-only run dirs), catalog.db,
-                          forward/ (deployments, mock host, export bundles)
+                          forward/ (deployments, mock host, export bundles), signal_research/ (read-only experiment
+                          dirs), signal_imports/ (generated strategy modules of imported signals)
 ```
 
 ## Guarantees and their tests
@@ -50,6 +54,12 @@ var/                      generated, gitignored: cache/ (datasets), experiments/
 | reproducible runs, immutable artifacts, legacy snapshots | `tests/test_experiments.py` |
 | forward == backtest on deterministic data; failure isolation; restatements; idempotent deploy/sync | `tests/test_paper.py` |
 | API contract and the end-to-end workflows | `tests/test_api.py` |
+| signals: no look-ahead (all 217), indicators vs reference loops, trigger definitions, combinations | `tests/test_signals.py` |
+| event study: next-open timing, purged partitions, locked test period, missing data, split-adjusted returns | `tests/test_signal_research.py` |
+| controls: same-session same-group pools, leave-one-out means, random dates, benchmarks, reproducible draws | `tests/test_signal_research.py` |
+| randomization test calibrated (random signals) and powerful (oracles); BH, bootstrap, verdicts | `tests/test_signal_research.py` |
+| append-only test ledger and locked results; failure isolation; cancellation; reproduction by content hash | `tests/test_signal_research.py` |
+| imported signal trades exactly the researched events; forward deploy pins the signal code | `tests/test_signal_research.py` |
 
 ## Data policy
 - Bars are loaded from 2018-01-01 (warm-up only), backtests start from 2019-01-01, and the hard ceiling is

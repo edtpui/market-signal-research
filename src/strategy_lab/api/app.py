@@ -125,6 +125,7 @@ def create_app(lab: Lab | None = None) -> FastAPI:
     def health():
         return dict(ok=True, version=strategy_lab.__version__, now_utc=dt.datetime.now(dt.timezone.utc).isoformat(),
                     policy=lab.policy.to_dict(), strategies=len(lab.registry.all()),
+                    signals=len(lab.signals.all()), signal_families=len(lab.signals.families),
                     strategy_errors=lab.registry.errors, workspace="ClaudeWorkspace (dev, EXPLORATORY)",
                     forward=dict(mock_dataset=lab.forward.mock_dataset, ptrade_api_enabled=bool(lab.forward.ptrade_url)))
 
@@ -154,7 +155,10 @@ def create_app(lab: Lab | None = None) -> FastAPI:
         d["versions"] = lab.registry.versions(strategy_id)
         d["source"] = lab.registry.sources[(cls.id, cls.version)]
         d["source_file"] = inspect.getfile(cls)
-        d["code"] = inspect.getsource(cls)
+        try:
+            d["code"] = inspect.getsource(cls)
+        except (OSError, TypeError):            # a generated class (imported signal): show its module
+            d["code"] = Path(d["source_file"]).read_text(encoding="utf-8")
         d["warmup_default"] = cls().warmup()
         return d
 
@@ -424,6 +428,9 @@ def create_app(lab: Lab | None = None) -> FastAPI:
                     protocol=(b / "docs" / "protocols" / f"{d['book_id']}.md").read_text(encoding="utf-8"))
 
     app.include_router(api)
+    from strategy_lab.api.signals import build_router
+    lab.research.recover_interrupted()
+    app.include_router(build_router(lab))
 
     # -- the mock host's read API (API v1 shapes, for HTTP-level checks) --------------------------------------------
     mock = APIRouter(prefix="/mock-ptrade/api/v1", tags=["mock ptrade (SIMULATED)"])

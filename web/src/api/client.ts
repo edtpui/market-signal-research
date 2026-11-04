@@ -93,10 +93,23 @@ export interface StrategyInfo {
   versions: string[];
 }
 
+export interface SignalProvenance {
+  strategy_id: string;
+  warning: string;
+  created_at_utc: string;
+  signal: { key: string; kind: string; id: string; version: string; family: string; name: string; direction: string; params: Record<string, unknown>; trigger: string; source_sha256: string };
+  research: { experiment_id: string; experiment_name: string; dataset: string; dataset_version: string; universe_name: string | null; n_symbols: number; start: string; end: string;
+    methodology_hash: string; primary_horizon: number; permutations: number; seed: number;
+    results: { partition: string; role: string; horizon: number; n: number; mean: number | null; excess_matched: number | null; ci: [number | null, number | null]; q_matched: number | null; excess_random_date: number | null; verdict: string }[] };
+  validation: { partitions: { name: string; role: string; start: string; end: string }[]; test_evaluated: boolean; test_evaluations: { first_use: boolean; evaluations: number; locked_experiment: string }[]; note: string };
+  defaults: Record<string, unknown>;
+}
+
 export interface StrategyDetail extends StrategyInfo {
   source_file: string;
   code: string;
   warmup_default: number;
+  provenance?: SignalProvenance;
 }
 
 export interface DatasetMeta {

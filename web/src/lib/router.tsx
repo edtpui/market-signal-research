@@ -30,6 +30,7 @@ export function useLocation(): { path: string; search: URLSearchParams } {
 export type Route =
   | { page: "overview" }
   | { page: "strategies"; id?: string }
+  | { page: "signals"; view: SignalView; id?: string; key?: string }
   | { page: "backtest" }
   | { page: "run"; id: string }
   | { page: "forward"; id?: string }
@@ -39,9 +40,21 @@ export type Route =
   | { page: "settings" }
   | { page: "missing"; path: string };
 
+export type SignalView = "library" | "signal" | "new" | "rankings" | "history" | "experiment" | "result";
+
 export function match(path: string): Route {
   const p = path.replace(/\/+$/, "") || "/";
   if (p === "/") return { page: "overview" };
+  if (p === "/signals") return { page: "signals", view: "library" };
+  if (p === "/signals/new") return { page: "signals", view: "new" };
+  if (p === "/signals/rankings") return { page: "signals", view: "rankings" };
+  if (p === "/signals/history") return { page: "signals", view: "history" };
+  let sm = /^\/signals\/library\/([^/]+)$/.exec(p);
+  if (sm) return { page: "signals", view: "signal", id: decodeURIComponent(sm[1]) };
+  sm = /^\/signals\/experiments\/([^/]+)\/([^/]+)$/.exec(p);
+  if (sm) return { page: "signals", view: "result", id: decodeURIComponent(sm[1]), key: decodeURIComponent(sm[2]) };
+  sm = /^\/signals\/experiments\/([^/]+)$/.exec(p);
+  if (sm) return { page: "signals", view: "experiment", id: decodeURIComponent(sm[1]) };
   let m = /^\/strategies(?:\/([^/]+))?$/.exec(p);
   if (m) return { page: "strategies", id: m[1] ? decodeURIComponent(m[1]) : undefined };
   if (p === "/backtest") return { page: "backtest" };
