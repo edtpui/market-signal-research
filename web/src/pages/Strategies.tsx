@@ -1,0 +1,90 @@
+// Strategy Library: every registered strategy (built-in and strategies_user/), its versions, typed parameters,
+// data and order requirements, ptrade forward compatibility, and its source (whose sha256 every run records).
+import { useStrategies, useStrategy } from "@/api/hooks";
+import type { StrategyInfo } from "@/api/client";
+import { DataTable, type Col } from "@/components/DataTable";
+import { Empty, ErrorState, KV, Loading, PageHeader, Panel } from "@/components/common";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import * as fmt from "@/lib/format";
+import { navigate } from "@/lib/router";
+
+export function ptradeCompatible(s: Pick<StrategyInfo, "required_fields" | "order_types" | "long_only">): { ok: boolean; why: string } {
+  const extra = s.required_fields.filter((f) => !["open", "close"].includes(f));
+  const orders = s.order_types.filter((o) => o !== "market");
+  if (extra.length) return { ok: false, why: `needs ${extra.join(", ")} (ptrade Frames carry open/close only)` };
+  if (orders.length) return { ok: false, why: `uses ${orders.join(", ")} orders (market only on open/close bars)` };
+  if (!s.long_only) return { ok: false, why: "may short (ptrade basket books are long only)" };
+  return { ok: true, why: "open/close bars, market orders, long only" };
+}
+
+const cols: Col<StrategyInfo>[] = [
+  { id: "name", header: "Strategy", value: (s) => s.name, cell: (s) => <div><div className="font-medium">{s.name}</div><div className="num text-2xs text-muted-foreground">{s.id}</div></div> },
+  { id: "category", header: "Category", value: (s) => s.category, cell: (s) => <Badge variant="outline" className="rounded-sm text-2xs">{s.category}</Badge> },
+  { id: "versions", header: "Versions", value: (s) => s.versions.join(", "), cell: (s) => <span className="num">{s.versions.join(", ")}</span> },
+  { id: "params", header: "Params", align: "right", value: (s) => Object.keys(s.params).length },
+  { id: "fields", header: "Bars", value: (s) => s.required_fields.join(","), cell: (s) => <span className="num text-2xs">{s.required_fields.join(", ")}</span> },
+  { id: "orders", header: "Orders", value: (s) => s.order_types.join(","), cell: (s) => <span className="num text-2xs">{s.order_types.join(", ")}</span> },
+  { id: "ptrade", header: "Forward (ptrade)", value: (s) => ptradeCompatible(s).ok, cell: (s) => { const c = ptradeCompatible(s); return <span className={c.ok ? "text-pos" : "text-muted-foreground"} title={c.why}>{c.ok ? "compatible" : "backtest only"}</span>; } },
+  { id: "source", header: "Source", value: (s) => s.source, cell: (s) => <span className="num text-2xs text-muted-foreground">{s.source}</span> },
+];
+
+export function StrategiesPage({ id }: { id?: string }) {
+  const list = useStrategies();
+  const detail = useStrategy(id);
+  return (
+    <div className="space-y-3">
+      <PageHeader title="Strategy Library" sub="Built-in strategies and user modules in strategies_user/. Every run records the strategy's source sha256." />
+      {list.error && <ErrorState error={list.error} retry={list.refetch} />}
+      <div className={id ? "grid gap-3 xl:grid-cols-[1fr_1.2fr]" : ""}>
+        <Panel title="Strategies">
+          {list.isLoading ? <Loading rows={6} /> : <DataTable name="strategies" rows={list.data?.strategies ?? []} cols={cols} onRowClick={(s) => navigate(`/strategies/${s.id}`)} filter />}
+          {(list.data?.errors ?? []).map((e) => <div key={e.file} className="mt-2 text-xs text-neg">Failed to load <span className="num">{e.file}</span>: {e.error}</div>)}
+        </Panel>
+        {id && (
+          <Panel title={detail.data?.name ?? id} actions={detail.data && <Button size="xs" onClick={() => navigate(`/backtest?strategy=${encodeURIComponent(id)}`)}>Backtest this</Button>}>
+            {detail.isLoading ? <Loading rows={8} /> : detail.error ? <ErrorState error={detail.error} /> : detail.data ? (
+              <div className="space-y-3" data-strategy={id}>
+                <p className="text-xs leading-relaxed">{detail.data.description || "No description."}</p>
+                <KV rows={[
+                  ["Id / version", <span className="num">{detail.data.id} v{detail.data.version} (all: {detail.data.versions.join(", ")})</span>],
+                  ["Category", detail.data.category],
+                  ["Bars needed", <span className="num">{detail.data.required_fields.join(", ")}</span>],
+                  ["Order types", <span className="num">{detail.data.order_types.join(", ")}</span>],
+                  ["Long only", detail.data.long_only ? "yes" : "no (may short when allowed)"],
+                  ["Warm-up (defaults)", <span className="num">{detail.data.warmup_default} bars</span>],
+                  ["Forward on ptrade", (() => { const c = ptradeCompatible(detail.data); return <span className={c.ok ? "text-pos" : "text-warn"}>{c.ok ? "compatible" : "not deployable"}: {c.why}</span>; })()],
+                  ["Source", <span className="num text-2xs break-all">{detail.data.source_file}</span>],
+                  ["sha256", <span className="num text-2xs">{detail.data.source_sha256}</span>],
+                ]} />
+                <div>
+                  <div className="mb-1 text-2xs font-semibold tracking-wide text-muted-foreground uppercase">Parameters</div>
+                  {Object.keys(detail.data.params).length === 0 ? <Empty title="No parameters" /> : (
+                    <table className="w-full text-xs">
+                      <thead><tr className="border-b text-2xs text-muted-foreground"><th className="py-1 text-left font-medium">Name</th><th className="text-left font-medium">Type</th><th className="text-right font-medium">Default</th><th className="text-right font-medium">Range</th><th className="pl-3 text-left font-medium">Meaning</th></tr></thead>
+                      <tbody>
+                        {Object.entries(detail.data.params).map(([k, p]) => (
+                          <tr key={k} className="border-b last:border-0">
+                            <td className="num py-1">{k}</td>
+                            <td className="text-muted-foreground">{p.kind}</td>
+                            <td className="num text-right">{String(p.default)}</td>
+                            <td className="num text-right text-muted-foreground">{p.choices ? p.choices.join("|") : p.min !== null || p.max !== null ? `${p.min ?? "−∞"} … ${p.max ?? "∞"}` : fmt.DASH}</td>
+                            <td className="pl-3 text-muted-foreground">{p.description}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+                <details>
+                  <summary className="cursor-pointer text-2xs font-semibold tracking-wide text-muted-foreground uppercase">Source</summary>
+                  <pre className="num mt-1 max-h-[420px] overflow-auto rounded-md border bg-surface-2 p-2 text-[11px] leading-snug">{detail.data.code}</pre>
+                </details>
+              </div>
+            ) : null}
+          </Panel>
+        )}
+      </div>
+    </div>
+  );
+}

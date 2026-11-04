@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "strategy-lab"
+version = "0.1.0"
+description = "Historical backtesting and forward paper testing on one engine, with ptrade as the forward execution host. Dev workspace only: no broker, no live orders."
+requires-python = ">=3.12"
+# Verified on this host (Windows, Python 3.14.7) in projects/paper_trading/.venv: numpy 2.5.4, pandas 3.1.0,
+# duckdb 2.0.0, fastapi 0.162.0, pydantic 2.14.1, uvicorn 0.54.0, requests 2.34.2, pytest 9.1.1.
+# The plug-in's pinned engine needs only numpy, pandas and pydantic (all in ptrade's venv).
+dependencies = ["numpy>=2.0", "pandas>=2.2", "duckdb>=1.0", "pydantic>=2.6", "fastapi>=0.110", "uvicorn>=0.29",
+                "requests>=2.31"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"
+markers = ["realdata: reads the workspace research downloads read-only (skipped when they are absent)"]

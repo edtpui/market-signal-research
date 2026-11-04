@@ -1,0 +1,143 @@
+/* Strategy Lab theme: the ptrade web terminal's design tokens (paper_trading/web/src/styles/theme.css at 792758b),
+   Tailwind v4 CSS-first. Dark is the default (class="dark" on <html>); light is the same tokens stepped for a light
+   surface. The 8-slot series palette, pos/neg/warn tokens and research-period bands are unchanged, so charts and
+   tables read the same in both tools. Numbers use the mono stack with tabular figures. */
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.375rem;
+  --background: #f6f6f4;
+  --foreground: #161616;
+  --card: #fcfcfb;
+  --card-foreground: #161616;
+  --popover: #ffffff;
+  --popover-foreground: #161616;
+  --primary: #2a78d6;
+  --primary-foreground: #ffffff;
+  --secondary: #ecebe8;
+  --secondary-foreground: #161616;
+  --muted: #ecebe8;
+  --muted-foreground: #5c5b57;
+  --accent: #e6e5e1;
+  --accent-foreground: #161616;
+  --destructive: #d03b3b;
+  --border: #dcdbd6;
+  --input: #d2d1cc;
+  --ring: #2a78d6;
+  --surface-2: #f0efec;
+  --pos: #0b8a3e;
+  --neg: #c62f36;
+  --warn: #b57800;
+  --spy: #6e6d68;
+  --grid: #e7e6e2;
+  --band-dev: rgba(42, 120, 214, 0.08);
+  --band-test: rgba(235, 104, 52, 0.10);
+  --band-posthoc: rgba(232, 123, 164, 0.10);
+  --band-descriptive: rgba(98, 80, 214, 0.08);
+  --band-holdout: rgba(110, 109, 104, 0.14);
+  --band-forward: rgba(27, 175, 122, 0.08);
+}
+
+.dark {
+  --background: #0f1012;
+  --foreground: #ecebe8;
+  --card: #17181a;
+  --card-foreground: #ecebe8;
+  --popover: #1c1d20;
+  --popover-foreground: #ecebe8;
+  --primary: #3987e5;
+  --primary-foreground: #ffffff;
+  --secondary: #222326;
+  --secondary-foreground: #ecebe8;
+  --muted: #222326;
+  --muted-foreground: #9b9a94;
+  --accent: #26282c;
+  --accent-foreground: #ecebe8;
+  --destructive: #e66767;
+  --border: #2a2c30;
+  --input: #34363b;
+  --ring: #3987e5;
+  --surface-2: #1d1e21;
+  --pos: #2fbf71;
+  --neg: #f0605d;
+  --warn: #e3a32b;
+  --spy: #9b9a94;
+  --grid: #212226;
+  --band-dev: rgba(57, 135, 229, 0.09);
+  --band-test: rgba(217, 89, 38, 0.12);
+  --band-posthoc: rgba(213, 81, 129, 0.10);
+  --band-descriptive: rgba(144, 133, 233, 0.09);
+  --band-holdout: rgba(155, 154, 148, 0.10);
+  --band-forward: rgba(25, 158, 112, 0.08);
+}
+
+@theme inline {
+  --font-sans: "Inter", "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", "JetBrains Mono Variable", ui-monospace, "SFMono-Regular", "Cascadia Mono",
+    Menlo, Consolas, monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-surface-2: var(--surface-2);
+  --color-pos: var(--pos);
+  --color-neg: var(--neg);
+  --color-warn: var(--warn);
+  --color-spy: var(--spy);
+  --color-grid: var(--grid);
+  --color-series-1: #3987e5;
+  --color-series-2: #d95926;
+  --color-series-3: #199e70;
+  --color-series-4: #c98500;
+  --color-series-5: #d55181;
+  --color-series-6: #008300;
+  --color-series-7: #9085e9;
+  --color-series-8: #e66767;
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 4px);
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html,
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+}
+
+@layer utilities {
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}

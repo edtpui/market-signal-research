@@ -1,0 +1,73 @@
+# Strategy Lab settings. Relative paths resolve against the project root (projects/strategy_lab).
+
+[data]
+cache_dir = "var/cache"
+history_floor = "2018-01-01"   # earliest bar loaded: indicator warm-up only (ptrade baskets also read from 2018-01-02)
+backtest_floor = "2019-01-01"  # earliest backtest start
+ceiling = "2025-12-31"         # hard maximum (HOLDOUT starts 2026-01-01); a later value is refused at startup
+
+[store]
+experiments_dir = "var/experiments"
+catalog = "var/catalog.db"
+
+[strategies]
+user_dir = "strategies_user"   # custom strategy modules (*.py), discovered at startup
+
+[forward]
+dir = "var/forward"
+# The forward host. "mock" = the in-workspace mock of ptrade's basket host (SIMULATED, <= 2025 data).
+# The operational ptrade API (pt-web, /api/v1) serves HOLDOUT/FWD evidence and is disabled in ClaudeWorkspace;
+# set ptrade_api_url only in an operational deployment after approval.
+host = "mock"
+ptrade_api_url = ""
+mock_dataset = "us_core"
+
+[ptrade]
+# Deploy-time checks against ptrade's basket contract (src/strategy_lab/paper/contract.py).
+# universe_file: a copy of ptrade's config/universe.txt; empty = the deploy check reports the universe as unchecked.
+universe_file = ""
+contract_commit = "792758b"
+
+[universes]
+sector_etfs = ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY"]
+index_etfs = ["SPY", "QQQ", "IWM", "IJH", "IJR"]
+mega_caps = ["AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "BRK-B", "JPM", "JNJ", "XOM", "V", "PG", "UNH", "HD", "MA"]
+sp1500_file = "../../data/universe_us/universe_us.csv"   # in_sp1500 == 1 (today's list: survivorship bias)
+
+[[dataset]]
+id = "us_core"
+name = "US large + mid/small caps, index and sector ETFs (yfinance, 2018-2025)"
+provider = "yfinance_csv"
+paths = ["../../data/yf_2018_2025", "../../data/yf_2018_2025_midsmall", "../../data/yf_etf_2008_2025",
+         "../../data/yf_macro_2018_2025"]
+description = "Research downloads in ClaudeWorkspace/data. Adjusted OHLCV + raw close/volume. Universe lists are today's (survivorship bias)."
+
+[[dataset]]
+id = "us_large"
+name = "US large caps + SPY (yfinance, 2018-2025)"
+provider = "yfinance_csv"
+paths = ["../../data/yf_2018_2025"]
+
+[[dataset]]
+id = "etf_macro"
+name = "Index, sector ETFs and macro series (yfinance, 2018-2025)"
+provider = "yfinance_csv"
+paths = ["../../data/yf_etf_2008_2025", "../../data/yf_macro_2018_2025"]
+
+[[dataset]]
+id = "us_other"
+name = "Other US listings (yfinance, 2018-2025)"
+provider = "yfinance_csv"
+paths = ["../../data/yf_2018_2025_other"]
+
+[[dataset]]
+id = "synthetic"
+name = "SYNTHETIC random walks with splits and dividends"
+provider = "synthetic"
+seed = 7
+symbols = ["SYNA", "SYNB", "SYNC", "SYND", "SYNE", "SPYX"]
+start = "2018-01-01"
+end = "2025-12-31"
+splits = [["SYNB", "2021-06-01", 4.0], ["SYND", "2023-03-01", 2.0]]
+dividends = [["SYNA", "2020-03-02", 0.50], ["SYNA", "2021-03-01", 0.55], ["SYNC", "2022-09-01", 1.20]]
+gaps = [["SYNE", "2022-05-10"], ["SYNE", "2022-05-11"]]
