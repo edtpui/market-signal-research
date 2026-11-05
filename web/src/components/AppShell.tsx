@@ -35,7 +35,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="mx-auto flex h-11 max-w-[1680px] items-center gap-4 px-4">
           <Link to="/" className="flex items-center gap-2 font-semibold tracking-tight whitespace-nowrap">
             <FlaskConical className="size-4 text-primary" />
-            Strategy<span className="font-normal text-muted-foreground">Lab</span>
+            Market Signal<span className="font-normal text-muted-foreground">Research</span>
           </Link>
           <nav className="flex min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {NAV.map((n) => (

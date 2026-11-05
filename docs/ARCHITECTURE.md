@@ -1,4 +1,4 @@
-# Strategy Lab: audit and architecture
+# Market Signal Research: audit and architecture
 
 _2026-11-03. Dev-only project in `C:\AI\ClaudeWorkspace\projects\strategy_lab` (git, branch `claude-dev`, no remote).
 Nothing here is operational. The operational source of truth is `C:\AI\QwenWorkspace`, and it was only read for this
@@ -59,11 +59,11 @@ ETFs, QQQ, IWM, ^VIX, ^TNX, ...), all ending 2025-12-31. Each ticker has `<T>_1d
 `<T>_1d_raw.csv` (Close, Volume with `auto_adjust=False`, which yfinance **split-adjusts but does not
 dividend-adjust**). `yf_2008_2018` is the BACK window and is not configured. Daily bars only: no intraday, no bid/ask,
 no explicit split or dividend files. Known data issue A9: the adjusted file's volume can be split-adjusted twice, so
-Strategy Lab takes volume from the raw file.
+Market Signal Research takes volume from the raw file.
 
 ## 2. Architecture decision
 
-**A dedicated, small event-driven engine in Strategy Lab, with ptrade as the forward execution host through its
+**A dedicated, small event-driven engine in Market Signal Research, with ptrade as the forward execution host through its
 documented basket plug-in interface. No LEAN.**
 
 - **QuantConnect LEAN** was rejected. It is a .NET engine with its own data format and its own brokerage and
@@ -73,19 +73,19 @@ documented basket plug-in interface. No LEAN.**
 - **Building on ptrade's engine** is not possible for generic strategies. Its bracket pipeline is specific to
   stop/target signals, and its basket "engine" is each research model's own `simulate()`. There is no generic
   order/portfolio engine to extend.
-- **Chosen:** Strategy Lab owns one deterministic engine (strategy runner, order book, fill model, cost model,
+- **Chosen:** Market Signal Research owns one deterministic engine (strategy runner, order book, fill model, cost model,
   portfolio accounting). The same engine code runs in two places:
-  1. historical backtests in Strategy Lab;
-  2. inside ptrade, as a `PortfolioRule` plug-in whose `simulate()` drives the Strategy Lab runner over ptrade's
+  1. historical backtests in Market Signal Research;
+  2. inside ptrade, as a `PortfolioRule` plug-in whose `simulate()` drives the Market Signal Research runner over ptrade's
      asof-clipped `Frames`. This is exactly how ptrade already runs the six v5-family basket books (their rules call
      pinned research `simulate()` functions).
 
   ptrade stays the forward authority: it schedules the nightly session, supplies the data, validates the `BookRun`,
   persists it append-only, detects restatements, owns registration and pause/resume, and serves the results.
-  Strategy Lab never writes to a ptrade ledger, and it reads results only through API v1.
+  Market Signal Research never writes to a ptrade ledger, and it reads results only through API v1.
 
 The earlier platform plan (`QwenWorkspace/plans/2026-10-26_platform_plan.md`) rejected a separate engine because two
-engines drift. This design keeps that principle: one engine per strategy family. The plug-in carries Strategy Lab's
+engines drift. This design keeps that principle: one engine per strategy family. The plug-in carries Market Signal Research's
 engine as a sha256-pinned copy, as `models/fdb_v5fam` + `ptrade/basket_pin.py` do for the research code, and its
 config hash includes the pin. A change to the engine therefore becomes a new ptrade `model_id`.
 

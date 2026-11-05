@@ -32,7 +32,7 @@ export function SettingsPage() {
             ["Host", d.forward.host === "mock" ? "Mock of ptrade's basket host (SIMULATED)" : d.forward.host],
             ["Mock dataset", <span className="num">{d.forward.mock_dataset}</span>],
             ["ptrade API", d.forward.ptrade_api_url ?? "disabled (API v1 serves HOLDOUT/FWD evidence; set [forward] ptrade_api_url only in an operational deployment after approval)"],
-            ["Execution authority", "the paper host: Strategy Lab exports and reads, it never writes to a paper ledger"],
+            ["Execution authority", "the paper host: Market Signal Research exports and reads, it never writes to a paper ledger"],
           ]} />
         </Panel>
         <Panel title="Datasets">

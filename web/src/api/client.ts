@@ -1,4 +1,4 @@
-// Typed client for the Strategy Lab API (/api/v1). Types mirror the FastAPI responses (src/strategy_lab/api/app.py).
+// Typed client for the Market Signal Research API (/api/v1). Types mirror the FastAPI responses (src/strategy_lab/api/app.py).
 import type { Metrics } from "@/lib/metrics";
 
 export class ApiError extends Error {

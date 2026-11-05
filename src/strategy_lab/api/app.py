@@ -1,4 +1,4 @@
-"""Strategy Lab API (FastAPI, /api/v1) and the web UI (web/dist). Binds to 127.0.0.1 by default.
+"""Market Signal Research API (FastAPI, /api/v1) and the web UI (web/dist). Binds to 127.0.0.1 by default.
 
 Writes: launch experiments and reproductions, save/delete configurations, ingest a dataset, deploy to the paper host,
 advance/pause/resume the MOCK host, sync and reconcile deployments. Nothing here can place an order on the
@@ -96,7 +96,7 @@ class SavedConfig(BaseModel):
 def create_app(lab: Lab | None = None) -> FastAPI:
     lab = lab or Lab()
     lab.experiments.recover_interrupted()
-    app = FastAPI(title="Strategy Lab API", version=strategy_lab.__version__, default_response_class=J,
+    app = FastAPI(title="Market Signal Research API", version=strategy_lab.__version__, default_response_class=J,
                   description="Historical backtesting and forward paper testing (dev workspace, data <= 2025-12-31).")
     app.state.lab = lab
     api = APIRouter(prefix="/api/v1")
@@ -471,7 +471,7 @@ def create_app(lab: Lab | None = None) -> FastAPI:
         if path.startswith(("api/", "mock-ptrade/")):
             raise HTTPException(404, f"no route /{path}")
         if not WEB_DIST.exists():
-            return Response("Strategy Lab API is running; the web UI is not built (web/dist). See README.md.",
+            return Response("Market Signal Research API is running; the web UI is not built (web/dist). See README.md.",
                             media_type="text/plain")
         f = (WEB_DIST / path).resolve()
         if path and f.is_file() and WEB_DIST.resolve() in f.parents:

@@ -1,4 +1,4 @@
-/* Strategy Lab theme: the ptrade web terminal's design tokens (paper_trading/web/src/styles/theme.css at 792758b),
+/* Market Signal Research theme: the ptrade web terminal's design tokens (paper_trading/web/src/styles/theme.css at 792758b),
    Tailwind v4 CSS-first. Dark is the default (class="dark" on <html>); light is the same tokens stepped for a light
    surface. The 8-slot series palette, pos/neg/warn tokens and research-period bands are unchanged, so charts and
    tables read the same in both tools. Numbers use the mono stack with tabular figures. */

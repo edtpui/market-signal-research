@@ -108,7 +108,7 @@ function DeployDialog({ runId, defaultStart, open, onOpenChange }: { runId: stri
         <DialogTitle>Deploy to forward paper testing</DialogTitle>
         <DialogDescription>
           Freezes this run's strategy, version, parameters, universe and execution assumptions into a deployment. The paper
-          host executes it; Strategy Lab only reads the results back. The mock host is SIMULATED on ≤ 2025 data; the ptrade
+          host executes it; Market Signal Research only reads the results back. The mock host is SIMULATED on ≤ 2025 data; the ptrade
           target only writes an export bundle for an operator to review and apply.
         </DialogDescription>
         <div className="grid grid-cols-2 gap-2">

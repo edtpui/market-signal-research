@@ -255,7 +255,7 @@ export function ForwardPage({ id }: { id?: string }) {
   if (id) return <Detail id={id} />;
   return (
     <div className="space-y-3">
-      <PageHeader title="Forward Testing" sub="Deploy a finished backtest from its run page. The paper host executes every book; Strategy Lab reads the results back and reconciles them with the backtest engine." />
+      <PageHeader title="Forward Testing" sub="Deploy a finished backtest from its run page. The paper host executes every book; Market Signal Research reads the results back and reconciles them with the backtest engine." />
       <div className="grid gap-3 xl:grid-cols-[1fr_420px]">
         <Panel title="Deployments">
           {deps.isLoading ? <Loading rows={5} /> : deps.error ? <ErrorState error={deps.error} /> : (deps.data ?? []).length === 0 ? (

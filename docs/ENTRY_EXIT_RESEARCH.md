@@ -4,7 +4,7 @@ _2026-11-04. Dev-only, EXPLORATORY: data ≤ 2025-12-31 (HOLDOUT starts 2026-01-
 
 The Entry-Exit Research Lab measures which combinations of entry signals, exit signals, protective stops, trailing
 exits and profit targets work, and separates the contribution of the entry from that of the exit. It extends the
-Signal Research Lab (same data, eligibility, matching pools, partitions, statistics, ledgers) and the Strategy Lab
+Signal Research Lab (same data, eligibility, matching pools, partitions, statistics, ledgers) and the Market Signal Research
 engine (one execution model, one event-driven portfolio simulator, one forward adapter).
 
 ## 1. The supplied video
@@ -24,6 +24,24 @@ So no technique, rule or parameter of the video is known here, and **none is imp
 library below is the generalized library of the request. Integrating the video's techniques is an open task: given a
 transcript or the author's list, each technique becomes an `ExitDef` (section 3) with a crafted-bar test and a
 look-ahead test, and its original description is recorded next to its implementation in this document.
+
+**Update (2026-11-04, later).** In the built-in browser (which runs YouTube's scripts) the full video description is
+readable (9:24 long, auto-generated English captions exist). Summarized in my own words, it states the method:
+random entries (100,000 random stock/day picks over 17,768 US stocks, 2018-2026, delisted companies included), each
+closed by 152 exit rules (moving averages and the death cross, MACD, RSI, Stochastic, Bollinger Bands, Supertrend,
+Donchian and Keltner channels, candlestick patterns and others), and every rule compared with **its own sell signals
+moved to random dates on the same stock**. A placebo test showed the first version of that benchmark was biased
+(exits firing on random days "beat random" by up to 0.8 % per trade); the corrected version scores placebo rules at
+zero and detects a deliberately cheating rule (+4.5 % per trade). The exact rules, the 152 parameterizations and how
+the corrected benchmark draws its random dates are in the video itself, not the description: the transcript request
+(`youtubei/v1/get_transcript`) answers HTTP 400 in the built-in browser and the caption file is empty there, so the
+transcript must come from the user's own browser (save it as `var/sources/0RRXFUA-72M_transcript.txt`, gitignored).
+
+Consequences for this lab: (1) Supertrend is not yet an exit component; Keltner and death-cross exits exist as bearish
+catalog signals usable through `signal_exit`. (2) The video's core benchmark (an exit against its own signals shifted
+to random dates, validated by placebo and cheating rules) is **not implemented**: this lab compares entries with random
+entries under the same exit and exits with a baseline exit on identical entries, which answers a different question.
+Both are the next integration task once the transcript is available.
 
 ## 2. Architecture
 

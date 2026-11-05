@@ -1,9 +1,13 @@
-# Strategy Lab
+# Market Signal Research
+
+_Formerly "Strategy Lab" (renamed 2026-11-04). The display name changed; the Python package `strategy_lab`, this folder
+(`projects/strategy_lab`), the `sl-` book ids and the `ledger_strategy_lab` key keep their names, because the prepared
+ptrade bundle, its operator steps and the write-once imported strategy modules reference them._
 
 Historical backtesting and forward paper testing on one engine. Built in the ptrade web terminal's design (React,
 Tailwind, shadcn/ui, lightweight-charts) over a FastAPI backend. Dev-only project in ClaudeWorkspace: there is no
 broker, no live order and no access to HOLDOUT data. The paper-trading system in `C:\AI\QwenWorkspace\paper_trading`
-remains the forward execution authority; Strategy Lab exports to it and reads from it.
+remains the forward execution authority; Market Signal Research exports to it and reads from it.
 
 - Architecture and the audit behind it: `docs/ARCHITECTURE.md`
 - Forward integration with ptrade: `docs/PTRADE_INTEGRATION.md`
