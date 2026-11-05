@@ -30,6 +30,11 @@ def build_record(lab, eid: str, cell: str, name: str = "") -> dict:
         raise EntryExitError(f"{eid} is {meta['status']}: import from a finished experiment")
     cfg = st.config(eid)
     c = st.cell(eid, cell)
+    if c["entry"].get("kind") == "random":
+        raise EntryExitError("random entries are a benchmark, not a strategy: import a cell whose entry is a signal")
+    if c["exit"].get("lookahead") or c["exit"].get("style") == "calibration":
+        raise EntryExitError("calibration exits (placebo and cheating rules) check the benchmark; they are never "
+                             "imported into the Strategy Library")
     ei, pi = c["entry"]["index"], c["exit"]["index"]
     entry = cfg.entries[ei]
     plan = cfg.exits[pi]

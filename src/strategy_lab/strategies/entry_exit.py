@@ -343,6 +343,9 @@ def make_entry_exit_strategy(definition: EntryExitDefinition | dict, strategy_id
                              description: str = "") -> type[EntryExitBase]:
     d = definition if isinstance(definition, EntryExitDefinition) else EntryExitDefinition.model_validate(definition)
     plan = resolve_plan(d.exit)
+    if plan.lookahead:
+        raise ValueError(f"{strategy_id}: the exit plan contains a calibration rule that reads the future; it exists "
+                         "only to check the timing benchmark and can never be traded or backtested as a strategy")
     entry = None
     if d.entry is not None:
         from strategy_lab.signals.library import default_signal_registry

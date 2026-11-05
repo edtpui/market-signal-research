@@ -8,6 +8,7 @@ export type ExitKind = "condition" | "stop" | "target";
 export interface ExitInfo {
   id: string; version: string; family: string; kind: ExitKind; name: string; rule: string; doc: string;
   params: Record<string, ParamSpec>; fields: string[]; needs_benchmark: boolean; warmup: number; intrabar: boolean; role: string;
+  style?: string; lookahead?: boolean; shiftable?: boolean;
 }
 export interface Catalog {
   roles: { id: string; name: string; description: string }[];
@@ -29,6 +30,9 @@ export interface Sizing { mode: "risk" | "weight"; risk_per_position: number; po
 export interface EEConfig {
   name?: string; notes?: string;
   entries: AnySpec[]; entry_families: string[]; entry_grids: { id: string; params: Record<string, unknown>; grid: Record<string, unknown[]> }[];
+  random_entries: { enabled: boolean; n: number };
+  timing: { enabled: boolean; draws: number };
+  calibration: { enabled: boolean; placebo_probs: number[]; oracle_drop: number };
   exits: ExitPlanSpec[]; exit_ids: string[]; exit_families: string[]; exit_grids: ExitGrid[]; protective: ExitComponentSpec[];
   baseline_exit: string | null;
   dataset: string; dataset_version?: string | null; universe?: string[] | null; universe_name?: string | null;
@@ -47,7 +51,7 @@ export interface EEConfig {
   stats: { bootstrap: number; alpha: number; economic_annual_excess: number; min_trades: number };
   seed: number;
   resolved_entries?: { key: string; name: string; family: string; kind: string; spec: AnySpec }[] | null;
-  resolved_exits?: { key: string; name: string; family: string; kinds: string[]; deployable: boolean; trigger: string; components: Record<string, unknown>[] }[] | null;
+  resolved_exits?: { key: string; name: string; family: string; kinds: string[]; deployable: boolean; trigger: string; components: Record<string, unknown>[]; style?: string; lookahead?: boolean; shiftable?: number[] }[] | null;
   resolved_grids?: unknown[] | null; analysis_end?: string | null;
 }
 
@@ -60,7 +64,7 @@ export interface ValidateResult {
   ok: boolean; n_entries: number; n_exits: number; n_cells: number; n_symbols: number; dataset_version: string;
   partitions: (Partition & { locked: boolean })[]; analysis_end: string;
   entries: { key: string; name: string; family: string; warmup: number }[];
-  exits: { key: string; name: string; family: string; deployable: boolean; trigger: string }[]; periods: string[]; notes: string[];
+  exits: { key: string; name: string; family: string; deployable: boolean; trigger: string; style?: string; timing?: boolean }[]; periods: string[]; notes: string[];
 }
 
 export type Status = "queued" | "running" | "done" | "failed" | "cancelled";
@@ -99,6 +103,8 @@ export interface CellPartition {
   own_risk_rate?: number; stop_breach_rate?: number; reasons?: Record<string, number>; excess_bench?: number | null; bench_ret?: number | null;
   matched?: Excess | null; random_dates?: Excess | null; by_year?: Group[]; by_market_trend?: Group[]; by_market_vol?: Group[]; by_stock_vol?: Group[];
   consistency_years?: number | null; positive_years?: number | null; hist_ret?: Hist | null; hist_bars?: Hist | null; excluded?: Record<string, number>;
+  timing?: { n: number; excess: number | null; real_mean?: number; shifted_mean?: number; ci: [number | null, number | null]; se: number | null;
+    p: number | null; beat_share?: number; by_year?: Group[]; positive_years?: number | null } | null;
 }
 export interface PortfolioRun {
   cell: string; partition: string; role: string; metrics: Record<string, number | null | unknown>; reasons: Record<string, string>;
@@ -106,10 +112,23 @@ export interface PortfolioRun {
 }
 export interface TestRow { cell: string; partition: string; role: string; n: number; n_dates: number; excess: number | null; ci: [number | null, number | null]; p: number | null; q: number | null; m_tests: number; verdict: { category: Verdict; reason: string; annualized_net_excess: number | null } }
 export interface PairRow { entry: number; exit: number; cell: string; base_cell: string; partition: string; n: number; diff: number | null; ci?: [number | null, number | null]; p?: number | null; q?: number | null; p_z?: number | null; q_z?: number | null; blocks?: number; win_share?: number; diff_median?: number }
+/** The random-timing exit benchmark (timing.json): each exit against its own sell signals moved to random dates. */
+export interface TimingRow {
+  cell: string; entry: number; exit: number; partition: string; role: string; style: string; n: number; excess: number | null;
+  ci: [number | null, number | null]; p: number | null; q: number | null; m_tests?: number; beat_share: number | null;
+  positive_years: number | null; calibration: boolean;
+}
+export interface StyleGroup {
+  entry: number; style: string; partition: string; role: string; exits: number; n: number; excess: number | null;
+  ci: [number | null, number | null]; se: number | null; beat: number; of: number; by_year: Group[]; positive_years: number | null;
+}
+export interface Timing { tests: TimingRow[]; calibration: TimingRow[]; style_groups: StyleGroup[]; draws: number; method: string; note: string }
+
 export interface CellDetail {
   cell: string; entry: { key: string; name: string; family: string; kind: string; id: string; index: number };
   exit: { key: string; name: string; family: string; index: number; components: number; kinds: string[]; trigger: string; deployable: boolean };
   counts: Record<string, unknown>; partitions: Record<string, CellPartition>; portfolio: Record<string, PortfolioRun>; tests: TestRow[]; vs_baseline: PairRow[];
+  timing_tests?: TimingRow[];
 }
 export interface Comparisons {
   baseline: { key: string | null; index: number | null };
@@ -166,6 +185,10 @@ export const useComparisons = (id?: string, enabled = true) => useQuery({
 export const useWalkForward = (id?: string, enabled = true) => useQuery({
   queryKey: ["ee-wf", id], enabled: !!id && enabled, staleTime: Infinity,
   queryFn: () => api.get<WalkForward>(`/entry-exit/experiments/${enc(id!)}/walk-forward`),
+});
+export const useTiming = (id?: string, enabled = true) => useQuery({
+  queryKey: ["ee-timing", id], enabled: !!id && enabled, staleTime: Infinity,
+  queryFn: () => api.get<Partial<Timing>>(`/entry-exit/experiments/${enc(id!)}/timing`),
 });
 export const useTests = (id?: string, enabled = true) => useQuery({
   queryKey: ["ee-tests", id], enabled: !!id && enabled, staleTime: Infinity,
@@ -228,9 +251,24 @@ export const METRIC_LABEL: Record<string, string> = {
   max_drawdown: "Portfolio max drawdown", calmar: "Portfolio Calmar", volatility: "Portfolio volatility", exposure: "Portfolio exposure",
   turnover: "Portfolio turnover", trade_count: "Portfolio trades", avg_trade_return: "Portfolio average trade",
   excess_return: "Portfolio excess vs benchmark", excess_random_portfolio: "Sharpe minus random-entry portfolios",
+  timing_excess: "Excess vs random timing of the same exit", q_timing: "BH q-value (random-timing test)",
+  timing_beat_share: "Trades beating their random timing",
 };
 export const PCT_METRICS = new Set(["excess_matched", "excess_random_dates", "excess_bench", "mean_ret", "median_ret", "win_rate", "ret_per_session", "mae", "mfe",
-  "stop_rate", "target_rate", "consistency_years", "positive_years", "total_return", "cagr", "max_drawdown", "volatility", "exposure", "avg_trade_return", "excess_return"]);
+  "stop_rate", "target_rate", "consistency_years", "positive_years", "total_return", "cagr", "max_drawdown", "volatility", "exposure", "avg_trade_return", "excess_return",
+  "timing_excess", "timing_beat_share"]);
 export const SIGNED_METRICS = new Set(["excess_matched", "excess_random_dates", "excess_bench", "mean_ret", "median_ret", "expectancy_r", "ret_per_session",
-  "trade_sharpe", "total_return", "cagr", "sharpe", "sortino", "calmar", "excess_return", "avg_trade_return", "excess_random_portfolio"]);
-export const LOWER_IS_BETTER = new Set(["q"]);
+  "trade_sharpe", "total_return", "cagr", "sharpe", "sortino", "calmar", "excess_return", "avg_trade_return", "excess_random_portfolio", "timing_excess"]);
+export const LOWER_IS_BETTER = new Set(["q", "q_timing"]);
+
+export const STYLE_LABEL: Record<string, string> = {
+  strength: "Sell into strength", weakness: "Sell into weakness", neutral: "Neutral signal", time: "Time exit",
+  protective: "Protective stop", target: "Profit target", calibration: "Calibration rule", mixed: "Mixed plan",
+};
+export const STYLE_INFO: Record<string, string> = {
+  strength: "sells after a rise: overbought oscillators, closes above an upper band",
+  weakness: "sells after a fall: trend breaks, moving-average crosses, breakdowns below a prior low or a lower band",
+  neutral: "a condition that is neither (or a custom signal)", time: "fixed holding period or calendar rule",
+  protective: "stop-loss levels only", target: "profit targets only", calibration: "placebo or cheating rule that checks the benchmark",
+  mixed: "conditions of more than one style",
+};

@@ -227,13 +227,23 @@ def test_catalog_covers_every_requested_category():
             "profit_lock", "first_bearish_after_momentum", "consecutive_bearish", "loss_of_momentum", "no_new_high",
             "lower_high", "structure_break", "resistance_reversal", "failed_breakout", "failed_continuation",
             "bearish_reversal_pattern", "time_1d", "time_5d", "time_10d", "time_20d", "time_60d", "time_exit",
-            "thesis_expiry", "signal_exit"}
+            "thesis_expiry", "signal_exit",
+            # named in the 0RRXFUA-72M video
+            "death_cross", "close_below_sma200", "supertrend_exit", "bb_upper_close", "stoch_overbought",
+            "breakdown_20d_low", "breakdown_52w_low", "keltner_breakdown", "placebo_random_exit",
+            "oracle_next_day_drop"}
     assert need <= ids
     d = reg.describe()
-    assert {f["id"] for f in d["families"]} == {"indicator", "target", "stop", "trailing", "price_action", "time"}
+    assert {f["id"] for f in d["families"]} == {"indicator", "target", "stop", "trailing", "price_action", "time",
+                                                "calibration"}
+    styles = {e["id"]: e["style"] for e in d["exits"]}
+    assert styles["rsi_cross_below"] == styles["bb_upper_close"] == styles["stoch_overbought"] == "strength"
+    assert styles["death_cross"] == styles["breakdown_20d_low"] == styles["keltner_breakdown"] == "weakness"
+    assert [e["id"] for e in d["exits"] if e["lookahead"]] == ["oracle_next_day_drop"]
 
 
-@pytest.mark.parametrize("exit_id", [d.id for d in default_exit_registry().all() if d.id != "signal_exit"])
+@pytest.mark.parametrize("exit_id", [d.id for d in default_exit_registry().all()
+                                     if d.id != "signal_exit" and not d.lookahead])
 def test_no_exit_component_looks_ahead(exit_id):
     """Poison every bar after a cut: the component's series and the trades that close before the cut stay the
     same."""
@@ -652,3 +662,129 @@ def test_api_routes(elab):
                                                        "min_trades": 1}).status_code == 200
     p = api.post("/api/v1/entry-exit/plans/resolve", json={"components": [{"id": "stop_atr"}, {"id": "target_2r"}]})
     assert p.json()["intrabar"] and not p.json()["deployable"]
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# the random-timing exit benchmark (0RRXFUA-72M): shifts, calibration, random entries
+# ---------------------------------------------------------------------------------------------------------------------
+def test_circular_shift_keeps_count_and_spacing_and_moves_the_dates():
+    from strategy_lab.entryexit.engine import circular_shift
+    rng = np.random.default_rng(3)
+    a = (rng.random((300, 4)) < 0.05).astype(float)
+    lo, hi = np.array([0, 10, 50, 0]), np.array([299, 280, 299, 120])
+    for c in range(4):
+        a[:lo[c], c] = np.nan
+        a[hi[c] + 1:, c] = np.nan
+    u = np.array([7, 33, 101, 60])
+    b = circular_shift(a, lo, hi, u)
+    for c in range(4):
+        x, y = a[lo[c]: hi[c] + 1, c], b[lo[c]: hi[c] + 1, c]
+        L = hi[c] - lo[c] + 1
+        assert np.nansum(x) == np.nansum(y)                                   # same number of signals
+        px, py = np.flatnonzero(x > 0), np.flatnonzero(y > 0)
+        assert sorted((px + u[c]) % L) == sorted(py)                          # same spacing, moved by u
+        assert not np.array_equal(px, py)
+        assert np.array_equal(np.isnan(a[:, c]), np.isnan(b[:, c]))           # outside the span untouched
+
+
+def test_the_oracle_reads_the_future_and_is_refused_by_strategies():
+    md = make_data(n=200, symbols=("AAA", "BBB"), seed=6)
+    rt = PlanRuntime(resolve_plan(single("oracle_next_day_drop")), Common(14, 2.0))
+    a = rt.series(Indicators(Panel(dict(md.fields))))["c0:on"].to_numpy()
+    poisoned = {k: v.copy() for k, v in md.fields.items()}
+    poisoned["close"].iloc[101:] *= 0.5                                       # a crash right after the cut
+    b = rt.series(Indicators(Panel(poisoned)))["c0:on"].to_numpy()
+    assert not np.array_equal(a[:101], b[:101])                               # the poison test catches it
+    with pytest.raises(ValueError, match="reads the future"):
+        make_entry_exit_strategy(EntryExitDefinition(exit=single("oracle_next_day_drop")), "ee_cheat")
+    assert not resolve_plan(single("oracle_next_day_drop")).deployable
+
+
+def test_random_timing_benchmark_scores_placebos_at_zero_and_detects_the_cheating_rule(elab):
+    R = elab.entry_exit
+    eid = R.create(ecfg(random_entries={"enabled": True, "n": 4000}, exit_ids=["rsi_cross_below", "death_cross"],
+                        calibration={"enabled": True}, baseline_exit=None, max_hold=120,
+                        controls={"matched": False, "random_dates": False}, portfolio={"run": "none"},
+                        timing={"draws": 10}))
+    R.execute(eid)
+    tj = R.read_json(eid, "timing.json")
+    cal = {(t["cell"], t["partition"]): t for t in tj["calibration"]}
+    names = [x["name"] for x in R.config(eid).resolved_exits]
+    oracle = names.index(next(n for n in names if n.startswith("Cheating")))
+    placebo = [i for i, n in enumerate(names) if n.startswith("Placebo")]
+    for part in ("train", "validation"):
+        o = cal[(f"e000_x{oracle:03d}", part)]
+        assert o["excess"] > 0.005 and o["p"] < 0.01                          # the edge is found
+        for i in placebo:
+            pl = cal[(f"e000_x{i:03d}", part)]
+            assert pl["p"] > 0.01, (names[i], part, pl)                       # no edge is invented
+    assert len(tj["tests"]) == 4 and all(t["q"] is not None for t in tj["tests"])   # 2 real rules x 2 partitions
+    assert {g["style"] for g in tj["style_groups"]} == {"strength", "weakness"}
+    m = R.matrix(eid, "train", "timing_excess")
+    assert m["cells"][0][0]["value"] is not None and m["exits"][0]["style"] == "strength"
+    with pytest.raises(Exception, match="random entries are a benchmark"):
+        elab.import_entry_exit(eid, "e000_x000")
+
+
+def test_random_entries_are_eligible_reproducible_and_shared_by_every_exit(elab):
+    from strategy_lab.entryexit import engine as E
+    cfg = ecfg(random_entries={"enabled": True, "n": 1500}, exit_ids=["time_5d"], baseline_exit=None,
+               portfolio={"run": "none"})
+    rc, entries, plans = E.resolve_config(cfg, elab)
+    assert entries[-1].key == "random_entries@1.0:1500:0" and rc.entries == []
+    es = E.prepare(rc, entries, plans, elab)
+    a, b = E.entry_events(es, entries[-1]), E.entry_events(es, entries[-1])
+    assert len(a.t) == 1500 and np.array_equal(a.t, b.t) and np.array_equal(a.s, b.s)
+    assert es.study.eligible[a.t, a.s].all() and (np.diff(a.t) >= 0).all()
+    assert len(set(zip(a.t.tolist(), a.s.tolist()))) == 1500                 # without replacement
+
+
+def test_api_errors_are_explained_in_words_and_the_timing_route_serves_the_benchmark(elab):
+    from asgi import Client
+    from strategy_lab.api.app import create_app
+    api = Client(create_app(elab))
+    body = ecfg(entries=[{"kind": "signal", "id": "t_random2"}], exit_ids=["rsi_cross_below"], baseline_exit=None,
+                portfolio={"run": "none"}, controls={"matched": False, "random_dates": False},
+                timing={"draws": 4}).model_dump(mode="json")
+
+    def problem(path, b):
+        r = api.post(path, json=b)
+        assert r.status_code == 422, r.text
+        j = r.json()
+        assert isinstance(j["detail"], str) and "{" not in j["detail"] and "Traceback" not in j["detail"]
+        return j
+
+    # a missing field and an unknown setting: field names in words, one line each
+    j = problem("/api/v1/entry-exit/validate", {k: v for k, v in body.items() if k != "dataset"} | {"colour": 1})
+    assert len(j["problems"]) == 2
+    assert any("is required" in p for p in j["problems"]) and any("is not a setting" in p for p in j["problems"])
+    assert all("loc" not in p and "type=" not in p for p in j["problems"])
+    # nothing to test
+    j = problem("/api/v1/entry-exit/validate", dict(body, entries=[]))
+    assert "entr" in j["detail"].lower() and j["hint"]
+    # an unknown exit and a bad parameter name the exit and say what to do
+    j = problem("/api/v1/entry-exit/experiments", dict(body, exit_ids=["no_such_exit"]))
+    assert "no_such_exit" in j["detail"] and j["detail"].startswith("The experiment could not be created")
+    bad_param = dict(body, exit_ids=[], exits=[{"components": [{"id": "rsi_cross_below", "params": {"level": 400}}]}])
+    j = problem("/api/v1/entry-exit/validate", bad_param)
+    assert "rsi_cross_below" in j["detail"] and "level" in j["detail"]
+    # past the data ceiling: HOLDOUT is explained, not just refused
+    j = problem("/api/v1/entry-exit/validate", dict(body, end="2026-03-01"))
+    assert "2025-12-31" in j["detail"] + " ".join(j["problems"]) + (j["hint"] or "")
+    # symbols that are not in the dataset are named before anything runs
+    j = problem("/api/v1/entry-exit/validate", dict(body, universe=[SYMS[0], "ZZQX1", "ZZQX2"]))
+    assert "ZZQX1, ZZQX2" in j["detail"] and "2 of the 3 symbols" in j["detail"] and "exist" in j["hint"]
+    # a cheating rule cannot be imported, in words
+    meta = api.post("/api/v1/entry-exit/experiments", json=dict(body, calibration={"enabled": True})).json()
+    eid = meta["experiment_id"]
+    elab.entry_exit.futures[eid].result(timeout=300)
+    tj = api.get(f"/api/v1/entry-exit/experiments/{eid}/timing").json()
+    assert tj["tests"] and tj["calibration"] and tj["draws"] == 4 and tj["method"]
+    names = [x["name"] for x in elab.entry_exit.config(eid).resolved_exits]
+    cheat = names.index(next(n for n in names if n.startswith("Cheating")))
+    r = api.post("/api/v1/entry-exit/import", json={"experiment_id": eid, "cell": f"e000_x{cheat:03d}"})
+    assert r.status_code == 422 and r.json()["detail"].startswith("This cell cannot be imported")
+    c = api.get(f"/api/v1/entry-exit/experiments/{eid}/cells/e000_x000").json()
+    assert c["timing_tests"] and c["partitions"]["train"]["timing"]["excess"] is not None
+    r = api.get("/api/v1/entry-exit/experiments/nope/timing")
+    assert r.status_code == 404 and "nope" in r.json()["detail"]

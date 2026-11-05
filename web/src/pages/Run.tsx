@@ -1,6 +1,7 @@
 // One experiment: headline metrics, equity vs benchmark, drawdown, rolling performance, monthly heatmap, exposure,
 // trades / orders / fills / positions / logs, and provenance (config, data version, code hashes). From here a run
 // can be reproduced, cloned, compared or deployed to forward paper testing.
+import { ProgressBar } from "@/components/Progress";
 import { Copy, GitCompare, Repeat, Rocket } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -203,7 +204,7 @@ export function RunPage({ id }: { id: string }) {
           {r.reproduction.code_changed.length > 0 && ` Code changed since the original: ${r.reproduction.code_changed.join(", ")}.`}
         </div>
       )}
-      {(r.status === "queued" || r.status === "running") && <Panel title="Running"><Loading rows={4} /><div className="mt-2 text-xs text-muted-foreground">The run executes in the background; this page refreshes when it finishes.</div></Panel>}
+      {(r.status === "queued" || r.status === "running") && <ProgressBar value={null} label={r.status === "queued" ? "Queued" : "Backtest running"} detail="the engine reports no session count; this page refreshes when it finishes" startedAt={r.started_at_utc} />}
       {r.status === "failed" && <ErrorState error={`${r.error}${d.error ? `\n\n${d.error.slice(-1500)}` : ""}`} />}
       {done && (
         <>

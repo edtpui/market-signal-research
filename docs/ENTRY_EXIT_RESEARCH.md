@@ -7,41 +7,61 @@ exits and profit targets work, and separates the contribution of the entry from 
 Signal Research Lab (same data, eligibility, matching pools, partitions, statistics, ledgers) and the Market Signal Research
 engine (one execution model, one event-driven portfolio simulator, one forward adapter).
 
-## 1. The supplied video
+## 1. The supplied video and its exit-timing method
 
-`https://www.youtube.com/watch?v=0RRXFUA-72M` is "I Tested 152 Exit Strategies on 17,768 Stocks" by the channel
-Algovibes (title and channel from YouTube's oEmbed endpoint, fetched 2026-11-04). **Its content could not be examined:**
+`https://www.youtube.com/watch?v=0RRXFUA-72M`, "I Tested 152 Exit Strategies on 17,768 Stocks" (Algovibes, 9:24). The
+watch page, caption endpoints and transcript sites gave no content from this environment (tried 2026-11-04: oEmbed
+title only, empty `api/timedtext`, HTTP 400 on `youtubei/v1/get_transcript`, 403 from three transcript sites); the
+user supplied the transcript in chat on 2026-11-04. It is not stored here (third-party text); what follows is my
+summary, in my own words, of what the video does and claims.
 
-| Source tried (2026-11-04) | Result |
+### 1.1 What the video does
+- **Entries are random.** 100,000 random (stock, day) picks over 17,768 US stocks (2018-2026, delisted names
+  included), bought at the next open. Every exit rule receives the same 100,000 entries, so rules differ only in when
+  they sell.
+- **Exits.** 152 rules: each trade is held until its rule fires (sold at the next open) or for one year at most.
+  Named families: the death cross, closes below the 200-day average and other moving-average breaks and crossovers,
+  MACD, RSI (falling from overbought), Stochastic above 80, Bollinger Bands (close above the upper band), Supertrend,
+  Donchian and Keltner channels, breaks of the 20-day and 52-week lows. Percentage stop-losses were not tested.
+- **Benchmark: the rule against its own random timing.** A first version shuffled holding periods between trades and
+  was biased: a long hold could land on a stock that was delisted after a few months and vice versa. The corrected
+  version takes each rule's own sell signals on each stock and moves them to random dates on that stock: same stock,
+  same number of signals, same spacing.
+- **Calibration.** Placebo rules that sell on random days must score zero (under the first benchmark the rare ones
+  "beat random" by up to 0.8 % per trade; under the corrected one they do not). A cheating rule that knows the stock
+  falls more than 3 % tomorrow must be detected (it beats random timing by about 4.5 % per trade).
+- **Multiple testing.** Results are corrected for testing 152 rules together.
+
+### 1.2 What the video claims (its numbers, not this lab's)
+81 of 152 rules (53 %) beat their own random timing, by a typical 0.03 % per trade, and none survives the correction
+for 152 tests. The death cross and closes below the 200-day average did worse than random timing. Grouped afterwards by
+type, rules that **sell into strength** (36: RSI leaving overbought, Stochastic above 80, close above the upper
+Bollinger band) beat random timing by about 0.38 % per trade (holds of about five weeks), positive in 7 of 9 years and
+in both halves of the sample; rules that **sell into weakness** (53: moving-average breaks and crosses, breaks of
+20-day and 52-week lows) were about 0.34 % worse than random, negative in 7 of 9 years, with 2020 (the COVID crash) the
+one year they clearly helped. The video's explanation is short-horizon mean reversion. Its own caveats: the grouping
+was made after looking, needs new data, covers daily US stocks only, does not combine exits with indicator entries.
+
+### 1.3 How the lab implements it
+| Video element | Implementation |
 |---|---|
-| the watch page | 923 characters of page text: title only, no description, chapters or captions |
-| YouTube caption endpoint (`api/timedtext`, auto captions) | empty response |
-| youtubetotranscript.com, youtube-transcript.io, notegpt.io | 403 / landing page, no transcript |
-| web search (exact title; channel + "152 exit strategies") | no write-up, transcript or summary of this video |
-| candleforrest.com (lists Algovibes strategies) | page renders no entries |
+| random entries, next-open fill, same entries for every rule | `random_entries` (config): `n` (stock, session) cells drawn uniformly without replacement from eligible ∧ inside the window ∧ inside a partition, seeded; one cohort shared by every exit (`RandomEntry`, `entry_events`) |
+| hold until the rule fires, at most one year | the exit plan's condition (sell at the next open) and `max_hold` = 252 sessions |
+| rule vs its own random timing | `timing` (on by default, `draws` = 10): for each plan with condition components (`ResolvedPlan.shiftable`), each stock's condition series is circularly shifted inside that stock's valid span by a seeded random offset per draw (same stock, same count, same spacing: `circular_shift`), the same entries are replayed, and per trade `real − mean(shifted)` is the timing excess (`timing_returns`, `timing_block`) |
+| statistics | mean timing excess with the wider of a date-block and a ticker cluster bootstrap CI, two-sided p, BH across the real rules of each partition (`finalize_timing`); share of trades beating their random timing; years positive |
+| placebo and cheating rules | `calibration`: `placebo_random_exit` (Bernoulli sells at 1 %, 3 %, 10 % of sessions) and `oracle_next_day_drop` (sells when tomorrow's close is > 3 % lower; `lookahead=True`, refused by strategies, deployment and import); reported apart, excluded from BH |
+| strength vs weakness | every exit carries a `style` (strength / weakness / neutral / time / protective / target / calibration), fixed in the code before any result; `style_groups` averages each event's timing excess over a style's exits, with a date-block CI, exits beating and years positive |
+| the named rules | existing: `rsi_overbought`, `rsi_cross_below`, `macd_bearish_cross`, `ma_bearish_cross`, `close_below_sma`, `bb_upper_rejection`, `donchian_exit` (trailing level); added: `death_cross`, `close_below_sma200`, `supertrend_exit`, `bb_upper_close`, `stoch_overbought`, `breakdown_low` / `breakdown_20d_low` / `breakdown_52w_low`, `keltner_breakdown` |
 
-So no technique, rule or parameter of the video is known here, and **none is implemented or claimed**. The exit
-library below is the generalized library of the request. Integrating the video's techniques is an open task: given a
-transcript or the author's list, each technique becomes an `ExitDef` (section 3) with a crafted-bar test and a
-look-ahead test, and its original description is recorded next to its implementation in this document.
+Tests: `test_circular_shift_keeps_count_and_spacing_and_moves_the_dates`, `test_the_oracle_reads_the_future_and_is_refused_by_strategies`,
+`test_random_timing_benchmark_scores_placebos_at_zero_and_detects_the_cheating_rule` (syn40: oracle excess > 0.5 %
+with p < 0.01, every placebo p > 0.01, in both partitions), `test_random_entries_are_eligible_reproducible_and_shared_by_every_exit`.
 
-**Update (2026-11-04, later).** In the built-in browser (which runs YouTube's scripts) the full video description is
-readable (9:24 long, auto-generated English captions exist). Summarized in my own words, it states the method:
-random entries (100,000 random stock/day picks over 17,768 US stocks, 2018-2026, delisted companies included), each
-closed by 152 exit rules (moving averages and the death cross, MACD, RSI, Stochastic, Bollinger Bands, Supertrend,
-Donchian and Keltner channels, candlestick patterns and others), and every rule compared with **its own sell signals
-moved to random dates on the same stock**. A placebo test showed the first version of that benchmark was biased
-(exits firing on random days "beat random" by up to 0.8 % per trade); the corrected version scores placebo rules at
-zero and detects a deliberately cheating rule (+4.5 % per trade). The exact rules, the 152 parameterizations and how
-the corrected benchmark draws its random dates are in the video itself, not the description: the transcript request
-(`youtubei/v1/get_transcript`) answers HTTP 400 in the built-in browser and the caption file is empty there, so the
-transcript must come from the user's own browser (save it as `var/sources/0RRXFUA-72M_transcript.txt`, gitignored).
-
-Consequences for this lab: (1) Supertrend is not yet an exit component; Keltner and death-cross exits exist as bearish
-catalog signals usable through `signal_exit`. (2) The video's core benchmark (an exit against its own signals shifted
-to random dates, validated by placebo and cheating rules) is **not implemented**: this lab compares entries with random
-entries under the same exit and exits with a baseline exit on identical entries, which answers a different question.
-Both are the next integration task once the transcript is available.
+Differences from the video, by design or by necessity: today's S&P 1500 members (survivors; the video includes
+delisted stocks), 2019-2024 (the 2025 test partition stays locked), costs included (5 bps slippage plus the spread
+model), a seeded circular shift (the video does not say how its random dates are drawn beyond same stock, count and
+spacing), the styles assigned before the replication rather than after, and a Donchian exit taken as the 20-day low
+break. The replication run and its numbers are in `reports/2026-11-04_entry_exit_research.md` (section 8).
 
 ## 2. Architecture
 
@@ -51,7 +71,7 @@ core/types.py  AttachedExit               stop/limit legs attached to an entry, 
 core/strategy.py  Strategy.precompute     causal series computed once, visible only up to the current session
 engine/runner.py  verify_precompute       recomputes on truncated data; a difference is a LookaheadError
 src/strategy_lab/entryexit/
-  components.py   ExitDef, ExitRegistry, the exit library (57 components, 6 families), Ctx, causal series
+  components.py   ExitDef, ExitRegistry, the exit library (68 components, 7 families), Ctx, causal series
   plan.py         ExitPlanSpec (components + condition logic), resolve_plan (key, deployability), PlanRuntime
   replay.py       the trade replay: every event an independent position, vectorized across trades
   config.py       EntryExitExperimentConfig (entries, exits, grids, controls, portfolio, validation)
@@ -114,11 +134,15 @@ and causal series (`tests/test_entry_exit.py::test_no_exit_component_looks_ahead
 all 56 parameterless-default components and checks that their series and every trade that closed before the cut are
 unchanged).
 
-**Implemented exits (57).**
+**Implemented exits (68; 66 tradable plus 2 calibration rules).**
 - A. Indicator: `rsi_overbought`, `rsi_cross_below`, `macd_bearish_cross`, `ma_bearish_cross` (SMA/EMA),
   `close_below_sma`, `close_below_ema` (cross or below), `bb_upper_rejection`, `momentum_deterioration` (ROC crosses
   below 0), `rs_deterioration` (RS line below its SMA; reads the benchmark), `volatility_shock` (return ≤ −k·sd),
-  `volatility_expansion` (RV ratio), `signal_exit` (any catalog signal or combination).
+  `volatility_expansion` (RV ratio), `signal_exit` (any catalog signal or combination); added for the exit-timing
+  study: `death_cross` (50/200 SMA cross), `close_below_sma200`, `supertrend_exit` (trend flips down; n, mult),
+  `bb_upper_close` (close above the upper band), `stoch_overbought` (%K above a level), `breakdown_low` (close below
+  the prior n-session low; `breakdown_20d_low`, `breakdown_52w_low` presets), `keltner_breakdown` (close below the
+  lower Keltner band).
 - B. Targets: `target_1r`, `target_1_5r`, `target_2r`, `target_3r`, `target_4r`, `target_5r`, `target_r` (any k),
   `target_pct`, `target_atr`, `target_level` (n-session high, upper Bollinger band, pivot R1, fixed price).
 - C. Stops: `stop_pct`, `stop_dollar`, `stop_atr`, `stop_swing_low` (lowest low of n), `stop_candle_low` (signal-bar
@@ -136,6 +160,12 @@ unchanged).
   sessions, exit unless the close is ≥ min_r·R above entry).
 - G. Partial profit-taking: any target with `fraction` < 1 (25/50/75 % or several tranches at separate targets) and
   `then` = breakeven / lock (`lock_r`), which raises the remaining position's stop floor after the tranche.
+- H. Calibration (never tradable): `placebo_random_exit` (sells on random sessions with probability `prob`) and
+  `oracle_next_day_drop` (reads tomorrow's close; exempt from the look-ahead test by declaration, refused by
+  strategies, deployment and import). They exist to check the random-timing benchmark (section 1.3).
+
+Every exit also has a **style** (`GET /catalog`, Exit Library column): strength (sells after a rise), weakness
+(sells after a fall or a trend break), neutral, time, protective, target, calibration.
 
 ## 4. Trigger semantics (deterministic, identical in both layers)
 
@@ -241,7 +271,8 @@ strategy version (and warns when the backtests used other parameters or universe
 
 ## 9. Known limitations
 
-- **The video's techniques are not implemented** (section 1).
+- **The exit-timing replication** differs from the video in universe (survivors), window, costs and the shift procedure (section 1.3); the strength/weakness split remains a hypothesis that needs data not yet used.
+- **Random-timing benchmark scope**: only condition components are shifted; stops, targets, trailing levels and time exits stay where they are, so a mixed plan is measured on its conditions' timing only.
 - **Survivorship bias**: today's universe lists; no delisted stocks in the downloads.
 - **Daily bars only**: intrabar order is unknown; stop-first is conservative for stop/target conflicts but a stop and
   a later recovery within one bar are not distinguishable.

@@ -141,3 +141,8 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+/* indeterminate progress: a stripe moving across the track */
+@keyframes progress-slide { 0% { left: -35%; } 100% { left: 100%; } }
+.progress-indeterminate { animation: progress-slide 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .progress-indeterminate { animation: none; left: 0; width: 100%; opacity: 0.5; } }

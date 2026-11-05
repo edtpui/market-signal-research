@@ -16,6 +16,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from fastapi import APIRouter, Body, FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field, ValidationError
 
@@ -104,20 +105,25 @@ def create_app(lab: Lab | None = None) -> FastAPI:
     async def _errors(request: Request, exc: Exception):
         """Domain errors -> 4xx/502 with the message. Registered per class: Starlette's catch-all handler would
         re-raise after responding. Anything else is a genuine 500."""
+        from strategy_lab.api.errors import friendly_body, hint_for
         status, detail = 500, f"{type(exc).__name__}: {exc}"
         if isinstance(exc, DeployError):
-            return J({"detail": str(exc), "problems": exc.problems}, status_code=422)
-        if isinstance(exc, (DataError, PolicyError, ParamError, StrategyError, ValidationError, ValueError,
-                            HostError)):
-            status = 422
+            return J({"detail": str(exc), "problems": exc.problems, "hint": hint_for(" ".join(exc.problems))},
+                     status_code=422)
+        if isinstance(exc, (RequestValidationError, ValidationError)):
+            path = request.url.path
+            ctx = "The experiment settings" if any(k in path for k in ("/experiments", "/validate")) else "The request"
+            return J(friendly_body(exc, ctx), status_code=422)
+        if isinstance(exc, (DataError, PolicyError, ParamError, StrategyError, ValueError, HostError)):
+            status, detail = 422, str(exc)
         elif isinstance(exc, (KeyError, StrategyNotFound, FileNotFoundError)):
             status, detail = 404, str(exc).strip("'\"")
         elif isinstance(exc, PtradeApiError):
             status = 502
-        return J({"detail": detail}, status_code=status)
+        return J({"detail": detail, "hint": hint_for(detail) if status == 422 else None}, status_code=status)
 
-    for cls in (DeployError, ValueError, ValidationError, StrategyError, HostError, KeyError, FileNotFoundError,
-                PtradeApiError):
+    for cls in (DeployError, ValueError, ValidationError, RequestValidationError, StrategyError, HostError, KeyError,
+                FileNotFoundError, PtradeApiError):
         app.add_exception_handler(cls, _errors)
 
     # -- status -------------------------------------------------------------------------------------------------
@@ -431,9 +437,14 @@ def create_app(lab: Lab | None = None) -> FastAPI:
     from strategy_lab.api.signals import build_router
     lab.research.recover_interrupted()
     app.include_router(build_router(lab))
-    from strategy_lab.api.entry_exit import build_router as build_ee_router
+    from strategy_lab.api.entry_exit import ConfigProblem, build_router as build_ee_router
     lab.entry_exit.recover_interrupted()
     app.include_router(build_ee_router(lab))
+
+    async def _config_problem(request: Request, exc: ConfigProblem):
+        return J(exc.body, status_code=422)
+
+    app.add_exception_handler(ConfigProblem, _config_problem)
 
     # -- the mock host's read API (API v1 shapes, for HTTP-level checks) --------------------------------------------
     mock = APIRouter(prefix="/mock-ptrade/api/v1", tags=["mock ptrade (SIMULATED)"])

@@ -11,6 +11,7 @@ import { ChoiceSelect, Field } from "@/components/ConfigForm";
 import { DataTable, type Col } from "@/components/DataTable";
 import { BarChart, ChartActions, ForestPlot } from "@/components/ResearchCharts";
 import { Empty, ErrorState, KV, Loading, PageHeader, Panel, PeriodBadge, Stat, StatusBadge } from "@/components/common";
+import { ProgressBar } from "@/components/Progress";
 import { Button } from "@/components/ui/button";
 import * as fmt from "@/lib/format";
 import { navigate } from "@/lib/router";
@@ -95,10 +96,10 @@ export function ExperimentResults({ id }: { id: string }) {
       <SubNav />
       {meta.error && meta.status !== "cancelled" && <ErrorState error={meta.error} />}
       {running && (
-        <div className="rounded-md border px-3 py-2 text-xs" data-progress>
-          <div className="mb-1 flex justify-between"><span>Running {meta.n_signals} signals</span><span className="num">{done} / {meta.n_signals}{meta.progress_failed ? ` (${meta.progress_failed} failed)` : ""}</span></div>
-          <div className="h-1.5 overflow-hidden rounded bg-muted"><div className="h-full bg-primary transition-all" style={{ width: `${(100 * done) / Math.max(1, meta.n_signals)}%` }} /></div>
-        </div>
+        <ProgressBar value={meta.status === "queued" ? 0 : meta.n_signals ? done / meta.n_signals : null}
+          label={meta.status === "queued" ? "Queued" : `Running ${meta.n_signals} signals`}
+          detail={`${done} of ${meta.n_signals} signals${meta.progress_failed ? ` (${meta.progress_failed} failed)` : ""}; results appear as each finishes`}
+          startedAt={meta.started_at_utc} />
       )}
       <div className="grid grid-cols-2 gap-1.5 md:grid-cols-4 lg:grid-cols-8">
         <Stat label="Signals" value={`${meta.progress_done}${meta.progress_failed ? ` (+${meta.progress_failed} failed)` : ""} / ${meta.n_signals}`} />

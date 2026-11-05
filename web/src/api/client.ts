@@ -4,11 +4,34 @@ import type { Metrics } from "@/lib/metrics";
 export class ApiError extends Error {
   status: number;
   problems?: string[];
-  constructor(message: string, status: number, problems?: string[]) {
+  hint?: string | null;
+  constructor(message: string, status: number, problems?: string[], hint?: string | null) {
     super(message);
     this.status = status;
     this.problems = problems;
+    this.hint = hint;
   }
+}
+
+/** A failed call in words a person can act on: a 0 status means the API is not running; a 500 is a bug, not the
+ * user's settings. */
+export function describeError(e: unknown): { title: string; message: string; problems: string[]; hint: string | null } {
+  if (e instanceof ApiError) {
+    if (e.status === 0) return { title: "The API is not reachable", message: "The Market Signal Research server is not running or not reachable.", problems: [], hint: "Start it (scripts/serve.py serve --port 8070) and reload the page." };
+    if (e.status >= 500) return { title: "Something went wrong on the server", message: e.message, problems: [], hint: "This is a bug rather than a problem with your settings; the server log has the details." };
+    // one problem: the sentence alone; several: the summary line, then each problem once in the list
+    const norm = (x: string) => x.toLowerCase().replace(/[.…]+$/, "");
+    const low = e.message.toLowerCase();
+    let problems = (e.problems ?? []).filter(Boolean);
+    let message = e.message;
+    if (problems.length === 1 && low.includes(norm(problems[0]))) problems = [];
+    else if (problems.length > 1) {
+      const i = low.indexOf(norm(problems[0]));
+      if (i > 0) message = e.message.slice(0, i).replace(/[\s:;]+$/, ":");
+    }
+    return { title: e.status === 404 ? "Not found" : "Please fix these settings", message, problems, hint: e.hint ?? null };
+  }
+  return { title: "Something went wrong", message: e instanceof Error ? e.message : String(e), problems: [], hint: null };
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -30,9 +53,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     throw new ApiError(`${method} ${path}: ${res.status} (not JSON)`, res.status);
   }
   if (!res.ok) {
-    const d = data as { detail?: unknown; problems?: string[] } | null;
+    const d = data as { detail?: unknown; problems?: string[]; hint?: string | null } | null;
     const detail = typeof d?.detail === "string" ? d.detail : JSON.stringify(d?.detail ?? data);
-    throw new ApiError(detail, res.status, d?.problems);
+    throw new ApiError(detail, res.status, d?.problems, d?.hint);
   }
   return data as T;
 }

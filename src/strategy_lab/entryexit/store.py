@@ -48,7 +48,7 @@ from strategy_lab.experiments.store import _git_state, _versions
 from strategy_lab.research.store import _clean, _json, _readonly, _write_parquet, read_parquet
 
 CODE_DIRS = ("entryexit", "signals", "research", "engine", "data")
-MATRIX_METRICS = ("mean_ret", "median_ret", "win_rate", "profit_factor", "expectancy_r", "avg_bars", "ret_per_session",
+MATRIX_METRICS = ("timing_excess", "q_timing", "timing_beat_share", "mean_ret", "median_ret", "win_rate", "profit_factor", "expectancy_r", "avg_bars", "ret_per_session",
                   "trade_sharpe", "mae", "mfe", "stop_rate", "target_rate", "excess_matched", "excess_random_dates",
                   "excess_bench", "q", "consistency_years", "positive_years", "n")
 PORTFOLIO_METRICS = ("total_return", "cagr", "sharpe", "sortino", "max_drawdown", "calmar", "volatility", "exposure",
@@ -164,7 +164,8 @@ def flat_row(summ: dict) -> dict:
                 target_rate=summ.get("target_rate"), excess_matched=m.get("excess"),
                 excess_random_dates=rd.get("excess"), excess_bench=summ.get("excess_bench"),
                 consistency_years=summ.get("consistency_years"), positive_years=summ.get("positive_years"),
-                p=m.get("p"), ci=m.get("ci"))
+                p=m.get("p"), ci=m.get("ci"), timing_excess=(summ.get("timing") or {}).get("excess"),
+                timing_p=(summ.get("timing") or {}).get("p"), timing_beat_share=(summ.get("timing") or {}).get("beat_share"))
 
 
 class EntryExitStore:
@@ -305,7 +306,7 @@ class EntryExitStore:
 
     def _run(self, eid: str, d: Path, cfg: EntryExitExperimentConfig, cancel) -> dict:
         lab = self.lab
-        entries = E.expand_entries(cfg, lab.signals)
+        entries = E.all_entries(cfg, lab.signals)
         plans = E.expand_exits(cfg)
         if [r.key for r in entries] != [x["key"] for x in cfg.resolved_entries or []] or \
                 [p.key for p in plans] != [x["key"] for x in cfg.resolved_exits or []]:
@@ -329,6 +330,7 @@ class EntryExitStore:
         summaries, tests, wf_cells, hashes = {}, [], {}, {}
         base_trades: dict[int, pd.DataFrame] = {}
         pair_rows = []
+        timing_tests, timing_pe, styles, ev_t, part_of, entry_of = [], {}, {}, {}, {}, {}
         done = 0
         t_cells = time.time()
         order = ([base_pi] if base_pi is not None else []) + [pi for pi in range(len(plans)) if pi != base_pi]
@@ -340,15 +342,17 @@ class EntryExitStore:
                 E._check(cancel)
                 cid = cell_id(ei, pi)
                 tr, cm, rdm = E.replay_cell(es, rt, ser, ev)
-                summ = E.cell_stats(es, tr, cm, rdm, f"{r.key}|{plan.key}")
-                trades = E.cell_trades_frame(es, tr, cm, rdm)
+                tm = E.timing_returns(es, rt, ser, ev, plan)
+                summ = E.cell_stats(es, tr, cm, rdm, f"{r.key}|{plan.key}", tm)
+                trades = E.cell_trades_frame(es, tr, cm, rdm, tm)
                 cdir = d / "cells" / cid
                 cdir.mkdir(parents=True, exist_ok=True)
                 head = dict(cell=cid, entry=dict(key=r.key, name=r.name, family=r.family, kind=r.spec.kind,
                                                  id=r.id, index=ei),
                             exit=dict(key=plan.key, name=plan.name, family=plan.family, index=pi,
                                       components=len(plan.components), kinds=plan.kinds, trigger=plan.trigger,
-                                      deployable=plan.deployable),
+                                      deployable=plan.deployable, style=plan.style, timing=bool(tm is not None),
+                                      lookahead=plan.lookahead),
                             counts=ev.counts, partitions=summ)
                 _json(_clean(head), cdir / "summary.json")
                 _write_parquet(trades, cdir / "trades.parquet")
@@ -359,6 +363,18 @@ class EntryExitStore:
                     tests.append(dict(cell=cid, partition=pname, role=s["role"], n=s.get("n", 0),
                                       n_dates=s.get("n_dates", 0), excess=m.get("excess"), ci=m.get("ci", [None, None]),
                                       p=m.get("p"), avg_bars=s.get("avg_bars")))
+                if tm is not None:
+                    for pname, s_ in summ.items():
+                        tb = s_.get("timing") or {}
+                        if tb.get("excess") is not None:
+                            timing_tests.append(dict(cell=cid, entry=ei, exit=pi, partition=pname, role=s_["role"],
+                                                     style=plan.style, n=tb["n"], excess=tb["excess"], ci=tb["ci"],
+                                                     p=tb["p"], beat_share=tb.get("beat_share"),
+                                                     positive_years=tb.get("positive_years"),
+                                                     calibration=plan.style == "calibration"))
+                    okt = (tr["status"] == "ok").to_numpy()
+                    timing_pe[cid] = np.where(okt, tr["ret"].to_numpy(float) - E.rowmean(tm), np.nan)
+                    styles[cid], ev_t[cid], part_of[cid], entry_of[cid] = plan.style, ev.t, ev.part, ei
                 cmean = trades["matched_mean"].to_numpy(float) if "matched_mean" in trades else np.full(len(tr), np.nan)
                 ok = (tr["status"] == "ok").to_numpy()
                 wf_cells[cid] = dict(entry_bar=np.where(ok, tr["entry_bar"], -1), exit_bar=np.where(ok, tr["exit_bar"],
@@ -378,6 +394,18 @@ class EntryExitStore:
         es.timings["cells_s"] = round(time.time() - t_cells, 2)
         tests = E.finalize(cfg, tests, S.ppy)
         pair_rows = E.finalize_pairs(pair_rows)
+        # the random-timing exit benchmark: BH over the real rules; calibration rows are checks, reported apart
+        real = E.finalize_timing([t for t in timing_tests if not t["calibration"]])
+        calib = [dict(t, q=None) for t in timing_tests if t["calibration"]]
+        groups_ = E.style_groups(es, {c: v for c, v in timing_pe.items() if styles[c] != "calibration"}, styles,
+                                 ev_t, part_of, entry_of)
+        _json(_clean(dict(
+            tests=real, calibration=calib, style_groups=groups_, draws=cfg.timing.draws,
+            method="each plan's condition signals moved to random dates on the same stock (circular shift by a random "
+                   "offset inside the stock's history: same stock, same number of signals, same spacing); the same "
+                   "entries replayed; excess = real return - mean of the shifted copies, per trade",
+            note="Placebo rules (random-day sells) should land near zero and the cheating rule (knows tomorrow's drop) "
+                 "far above it; if not, the benchmark is not trustworthy for this experiment.")), d / "timing.json")
         _json(_clean(dict(tests=tests, m_tests={p["name"]: sum(1 for t in tests if t["partition"] == p["name"] and
                                                                t["p"] is not None) for p in S.parts},
                           n_cells=n_cells)), d / "tests.json")
@@ -452,7 +480,8 @@ class EntryExitStore:
         pc = cfg.portfolio
         parts = [p for p in S.parts]
         train = next((p["name"] for p in parts if p["role"] == "train"), parts[0]["name"])
-        cells = [(ei, pi) for pi in range(len(plans)) for ei in range(len(entries))]
+        # calibration plans are benchmark checks, never strategies
+        cells = [(ei, pi) for pi in range(len(plans)) for ei in range(len(entries)) if plans[pi].style != "calibration"]
         if pc.run == "none":
             return dict(runs=0, cells={})
         if pc.run == "top":
@@ -621,6 +650,8 @@ class EntryExitStore:
         out["tests"] = [t for t in tests if t["cell"] == cid]
         comp = self.read_json(eid, "comparisons.json") or {}
         out["vs_baseline"] = [r for r in comp.get("hold_entry", []) if r["cell"] == cid]
+        tj = self.read_json(eid, "timing.json") or {}
+        out["timing_tests"] = [t for t in tj.get("tests", []) + tj.get("calibration", []) if t["cell"] == cid]
         return out
 
     def cell_trades(self, eid: str, cid: str, limit: int = 5000, partition: str | None = None) -> pd.DataFrame:
@@ -648,6 +679,8 @@ class EntryExitStore:
         cfg = self.config(eid)
         entries, exits = cfg.resolved_entries or [], cfg.resolved_exits or []
         tests = {(t["cell"], t["partition"]): t for t in (self.read_json(eid, "tests.json") or {}).get("tests", [])}
+        tj = self.read_json(eid, "timing.json") or {}
+        ttests = {(t["cell"], t["partition"]): t for t in tj.get("tests", []) + tj.get("calibration", [])}
         rows = []
         for ei, e in enumerate(entries):
             row = []
@@ -664,18 +697,26 @@ class EntryExitStore:
                     val = (pm or {}).get("metrics", {}).get(metric)
                 elif metric == "q":
                     val = t.get("q")
+                elif metric == "q_timing":
+                    val = ttests.get((cid, partition), {}).get("q")
                 elif metric == "excess_random_portfolio":
                     val = ((pm or {}).get("random_entry") or {}).get("sharpe", {}).get("excess")
                 else:
                     val = flat.get(metric)
-                row.append(dict(cell=cid, value=val, n=flat.get("n"), q=t.get("q"),
+                tt = ttests.get((cid, partition), {})
+                if metric.startswith("timing") or metric == "q_timing":
+                    qcell = tt.get("q")
+                else:
+                    qcell = t.get("q")
+                row.append(dict(cell=cid, value=val, n=flat.get("n"), q=qcell,
                                 verdict=(t.get("verdict") or {}).get("category"), has_portfolio=pm is not None))
             rows.append(row)
         return dict(partition=partition, metric=metric, entries=[dict(index=i, key=e["key"], name=e["name"],
                                                                       family=e["family"], kind=e["kind"])
                                                                  for i, e in enumerate(entries)],
                     exits=[dict(index=i, key=x["key"], name=x["name"], family=x["family"], kinds=x["kinds"],
-                                deployable=x["deployable"], components=len(x["components"]))
+                                deployable=x["deployable"], components=len(x["components"]),
+                                style=x.get("style", "neutral"), timing=bool(x.get("shiftable")))
                            for i, x in enumerate(exits)], cells=rows)
 
     def leaderboard(self, board: str, objective: str, partition_role: str = "validation", limit: int = 100,

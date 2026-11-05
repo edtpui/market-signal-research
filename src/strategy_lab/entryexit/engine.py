@@ -29,6 +29,7 @@ import pandas as pd
 
 from strategy_lab.analytics import metrics as mt
 from strategy_lab.core.market import MarketData
+from strategy_lab.core.strategy import ParamError
 from strategy_lab.data.policy import to_date
 from strategy_lab.engine.runner import StrategyRunner
 from strategy_lab.entryexit.components import Common, default_exit_registry
@@ -74,10 +75,14 @@ def expand_entries(cfg: EntryExitExperimentConfig, registry) -> list[Resolved]:
                                     label=f"{d.name} ({', '.join(f'{k}={v}' for k, v in zip(keys, combo))})"))
     out, seen = [], set()
     for it in items:
-        r = resolve_spec(it, registry)
+        try:
+            r = resolve_spec(it, registry)
+        except ParamError as e:
+            raise ParamError(f"entry signal '{getattr(it, 'id', None) or getattr(it, 'name', '')}': {e}") from None
         if r.direction != "bullish":
-            raise EntryExitError(f"entry {r.key} is {r.direction}: entries open long positions, so they must be "
-                                 "bullish signals (use bearish signals as exits: signal_exit)")
+            raise EntryExitError(f"entry '{r.name}' ({r.id}) is a {r.direction} signal: entries open long positions, "
+                                 "so they must be bullish signals (a bearish signal can be an exit through 'Any "
+                                 "catalog signal')")
         if r.key in seen:
             continue
         seen.add(r.key)
@@ -88,6 +93,49 @@ def expand_entries(cfg: EntryExitExperimentConfig, registry) -> list[Resolved]:
         raise EntryExitError("no entry signals selected")
     if len(out) > MAX_ENTRIES:
         raise EntryExitError(f"{len(out)} entries; at most {MAX_ENTRIES} per experiment")
+    return out
+
+
+class _Kind:
+    kind = "random"
+
+
+@dataclass
+class RandomEntry:
+    """The random-entry cohort (config.random_entries): not a catalog signal, so it cannot be imported or deployed."""
+    n: int
+    seed: int
+    spec: object = field(default_factory=_Kind)
+    family: str = "random"
+    direction: str = "bullish"
+    warmup: int = 1
+    needs_benchmark: bool = False
+
+    @property
+    def key(self) -> str:
+        return f"random_entries@1.0:{self.n}:{self.seed}"
+
+    @property
+    def id(self) -> str:
+        return "random_entries"
+
+    @property
+    def name(self) -> str:
+        return f"Random entries ({self.n:,})"
+
+    def describe(self) -> dict:
+        return dict(key=self.key, kind="random", id=self.id, version="1.0", family=self.family, name=self.name,
+                    direction=self.direction, n=self.n, seed=self.seed, warmup=1, scope="stock",
+                    trigger="n eligible stock-sessions drawn uniformly without replacement; buy at the next open")
+
+
+def all_entries(cfg: EntryExitExperimentConfig, registry) -> list:
+    """Catalog entries plus the random-entry cohort when it is on."""
+    out = expand_entries(cfg, registry) if (cfg.entries or cfg.entry_families or cfg.entry_grids) else []
+    if cfg.random_entries.enabled:
+        out.append(RandomEntry(cfg.random_entries.n, cfg.seed))
+    if not out:
+        raise EntryExitError("no entry signals selected (add a signal, a family, a grid or random entries)")
     return out
 
 
@@ -136,6 +184,14 @@ def expand_exits(cfg: EntryExitExperimentConfig, registry=None) -> list[Resolved
         base = resolve_plan(_with_protective(cfg, single(cfg.baseline_exit)), reg)
         if base.key not in {p.key for p in plans}:
             plans.append(base)
+    if cfg.calibration.enabled:
+        for i, q in enumerate(cfg.calibration.placebo_probs):
+            sp = single("placebo_random_exit", prob=float(q), seed=cfg.seed + 101 + i)
+            sp = sp.model_copy(update=dict(label=f"Placebo: random-day sell, {q:.1%} of sessions"))
+            plans.append(resolve_plan(_with_protective(cfg, sp), reg))
+        sp = single("oracle_next_day_drop", drop=cfg.calibration.oracle_drop)
+        sp = sp.model_copy(update=dict(label=f"Cheating rule: knows tomorrow's drop > {cfg.calibration.oracle_drop:.0%}"))
+        plans.append(resolve_plan(_with_protective(cfg, sp), reg))
     out, seen = [], set()
     for p in plans:
         if p.key in seen:
@@ -164,6 +220,13 @@ def resolve_config(cfg: EntryExitExperimentConfig, lab) -> tuple[EntryExitExperi
     if cfg.start < first:
         raise EntryExitError(f"start {cfg.start} is before the dataset's first session {first}")
     universe = cfg.universe or lab.universes.resolve(cfg.universe_name, store, cfg.dataset)
+    if cfg.universe:
+        cov = store.coverage(cfg.dataset, v.version)
+        have = set(cov.loc[cov["n_bars"] > 0, "symbol"])
+        unknown = sorted(set(universe) - have)
+        if unknown:
+            raise EntryExitError(f"{len(unknown)} of the {len(set(universe))} symbols are not in dataset {cfg.dataset}: "
+                                 f"{', '.join(unknown[:15])}{' ...' if len(unknown) > 15 else ''}")
     if len(universe) < 2:
         raise EntryExitError("matched-random controls need at least 2 symbols")
     m = cfg.matching
@@ -171,8 +234,10 @@ def resolve_config(cfg: EntryExitExperimentConfig, lab) -> tuple[EntryExitExperi
         raise EntryExitError("sector matching needs sector reference data ([signal_research] sector_file)")
     if m.market_cap:
         raise EntryExitError("market-cap matching needs a point-in-time market-cap file; it is not approximated")
-    entries = expand_entries(cfg, lab.signals)
+    entries = all_entries(cfg, lab.signals)
     plans = expand_exits(cfg)
+    if not plans:
+        raise EntryExitError("no exit plans selected")
     if len(entries) * len(plans) > MAX_CELLS:
         raise EntryExitError(f"{len(entries)} entries x {len(plans)} exits = {len(entries) * len(plans)} cells; at "
                              f"most {MAX_CELLS}")
@@ -188,7 +253,8 @@ def resolve_config(cfg: EntryExitExperimentConfig, lab) -> tuple[EntryExitExperi
                   points=[dict(params=pv, key=p.key) for pv, p in expand_grid(cfg, g)])
              for gi, g in enumerate(cfg.exit_grids)] + list(cfg.resolved_grids or [])
     resolved = cfg.model_copy(update=dict(
-        dataset_version=v.version, universe=list(universe), entries=[r.spec for r in entries], entry_families=[],
+        dataset_version=v.version, universe=list(universe),
+        entries=[r.spec for r in entries if not isinstance(r, RandomEntry)], entry_families=[],
         entry_grids=[], exits=[p.spec for p in plans], exit_ids=[], exit_families=[], exit_grids=[],
         partition_scheme="custom", partitions=parts, resolved_entries=[r.describe() for r in entries],
         resolved_exits=[p.describe() for p in plans], resolved_grids=grids, analysis_end=analysis_end,
@@ -210,6 +276,8 @@ class EEStudy:
     md: MarketData
     report: dict
     timings: dict = field(default_factory=dict)
+    span_lo: np.ndarray | None = None     # per symbol: first and last session with a valid close (timing shifts)
+    span_hi: np.ndarray | None = None
 
     @property
     def index(self):
@@ -221,6 +289,7 @@ class EEStudy:
 
 
 def research_config(cfg: EntryExitExperimentConfig, entries: list[Resolved]) -> SignalExperimentConfig:
+    entries = [r for r in entries if not isinstance(r, RandomEntry)]
     return SignalExperimentConfig(
         name=cfg.name, signals=[r.spec for r in entries], dataset=cfg.dataset, dataset_version=cfg.dataset_version,
         universe=cfg.universe, start=cfg.start, end=cfg.end, frequency=cfg.frequency, horizons=[1],
@@ -229,14 +298,16 @@ def research_config(cfg: EntryExitExperimentConfig, entries: list[Resolved]) -> 
                           min_pool=cfg.controls.min_date_pool),
         permutations=100, benchmarks=cfg.benchmarks, sector_benchmark=False, eligibility=cfg.eligibility,
         partition_scheme="custom", partitions=cfg.partitions, evaluate_test=cfg.evaluate_test, seed=cfg.seed,
-        save_controls=0, workers=1, resolved_signals=[r.describe() for r in entries], analysis_end=cfg.analysis_end)
+        save_controls=0, workers=1, analysis_end=cfg.analysis_end,
+        resolved_signals=[r.describe() for r in entries] or [dict(note="random entries only")])
 
 
 def prepare(cfg: EntryExitExperimentConfig, entries: list[Resolved], plans: list[ResolvedPlan], lab,
             cancel: threading.Event | None = None) -> EEStudy:
     t0 = time.time()
     scfg = research_config(cfg, entries)
-    study = research_prepare(scfg, entries, lab.store, lab.reference, cancel)
+    study = research_prepare(scfg, [r for r in entries if not isinstance(r, RandomEntry)], lab.store, lab.reference,
+                             cancel)
     f = study.ind.panel.fields
     bars = Bars(*(f[k].to_numpy(float) for k in ("open", "high", "low", "close")))
     bench_open = bench_close = None
@@ -253,9 +324,13 @@ def prepare(cfg: EntryExitExperimentConfig, entries: list[Resolved], plans: list
     if rep["plan_warmup_max"] > study.first:
         rep["plan_warmup_note"] = (f"some exits ask for {rep['plan_warmup_max']} sessions of warm-up; "
                                    f"{study.first} are loaded before the start (recursive averages start there)")
+    ok = bars.close_ok
+    has = ok.any(axis=0)
+    span_lo = np.where(has, ok.argmax(axis=0), 0)
+    span_hi = np.where(has, ok.shape[0] - 1 - ok[::-1].argmax(axis=0), -1)
     return EEStudy(cfg=cfg, study=study, bars=bars, costs=Costs(cfg.execution, cfg.trade_notional),
                    bench_open=bench_open, bench_close=bench_close, md=md, report=rep,
-                   timings=dict(prepare_s=round(time.time() - t0, 2)))
+                   timings=dict(prepare_s=round(time.time() - t0, 2)), span_lo=span_lo, span_hi=span_hi)
 
 
 def _common(cfg) -> Common:
@@ -281,13 +356,21 @@ def entry_events(es: EEStudy, r: Resolved) -> Events:
     S = es.study
     cfg = es.cfg
     T = S.T
-    trig = np.array(evaluate(r, S.ind).to_numpy(bool), dtype=bool, copy=True)
     win = np.zeros(T, bool)
     win[S.first: S.last + 1] = True
-    trig &= (win & (S.part >= 0))[:, None]
-    n_trig = int(trig.sum())
-    n_inel = int((trig & ~S.eligible).sum())
-    t, s, _ = sample_events(trig, S.eligible, cfg.sampling.mode, cfg.sampling.cooldown, [1])
+    if isinstance(r, RandomEntry):
+        cand = np.flatnonzero((S.eligible & (win & (S.part >= 0))[:, None]).ravel())
+        rng = stream(cfg.seed, r.key, 13)
+        pick = np.sort(rng.choice(len(cand), size=min(r.n, len(cand)), replace=False)) if len(cand) else cand
+        flat = cand[pick]
+        t, s = (flat // S.S).astype(np.int64), (flat % S.S).astype(np.int64)
+        n_trig, n_inel = int(len(t)), 0
+    else:
+        trig = np.array(evaluate(r, S.ind).to_numpy(bool), dtype=bool, copy=True)
+        trig &= (win & (S.part >= 0))[:, None]
+        n_trig = int(trig.sum())
+        n_inel = int((trig & ~S.eligible).sum())
+        t, s, _ = sample_events(trig, S.eligible, cfg.sampling.mode, cfg.sampling.cooldown, [1])
     part = S.part[t]
     bounds = np.array([p["last"] for p in S.parts], dtype=np.int64)
     end = bounds[np.maximum(part, 0)]
@@ -368,6 +451,67 @@ def _control_returns(es: EEStudy, rt: PlanRuntime, ser: dict, t: np.ndarray, s: 
         cr = replay(rt, es.bars, ser, t[sel], s[sel], end[sel], es.costs)
         vals[sel] = np.where(cr["status"] == "ok", cr["ret"], np.nan)
     return vals
+
+
+def circular_shift(a: np.ndarray, lo: np.ndarray, hi: np.ndarray, u: np.ndarray) -> np.ndarray:
+    """Each column's values between rows lo[j] and hi[j] rotated forward by u[j] rows (wrapping inside the span):
+    the same values, the same count and the same spacing, at other dates. Rows outside the span are unchanged."""
+    T, S = a.shape
+    R = np.arange(T)[:, None]
+    L = np.maximum(hi - lo + 1, 1)[None, :]
+    inside = (R >= lo[None, :]) & (R <= hi[None, :])
+    src = np.where(inside, lo[None, :] + (R - lo[None, :] - u[None, :]) % L, R)
+    return a[src, np.arange(S)[None, :]]
+
+
+def timing_returns(es: EEStudy, rt: PlanRuntime, ser: dict, ev: Events, plan: ResolvedPlan) -> np.ndarray | None:
+    """(events, draws) net returns of the plan with its condition signals moved to random dates on each stock.
+    The offsets depend on (seed, plan, draw) only, so every entry of a plan meets the same shifted rule."""
+    cfg = es.cfg
+    if not (cfg.timing.enabled and plan.shiftable) or not len(ev.t):
+        return None
+    keys = [rt.comps[k].key("on") for k in plan.shiftable]
+    lo, hi = es.span_lo, es.span_hi
+    L = np.maximum(hi - lo + 1, 2)
+    out = np.full((len(ev.t), cfg.timing.draws), np.nan)
+    for d in range(cfg.timing.draws):
+        rng = stream(cfg.seed, f"timing|{plan.key}", d)
+        u = 1 + np.floor(rng.random(len(L)) * (L - 1)).astype(np.int64)
+        shifted = dict(ser)
+        for k in keys:
+            shifted[k] = circular_shift(ser[k], lo, hi, u)
+        tr = replay(rt, es.bars, shifted, ev.t, ev.s, ev.end, es.costs)
+        out[:, d] = np.where(tr["status"] == "ok", tr["ret"], np.nan)
+    return out
+
+
+def timing_block(ret: np.ndarray, draws: np.ndarray, t: np.ndarray, s: np.ndarray, years: np.ndarray, block: int,
+                 cfg, rng: np.random.Generator) -> dict:
+    """The real plan against its own random timing: per trade d = return - mean of its shifted copies; the mean of
+    d with the wider of a date-block and a ticker cluster bootstrap; a two-sided p from that standard error; the
+    draw-level means (one per shifted copy); the share of years with a positive mean d."""
+    m = rowmean(draws)
+    ok = np.isfinite(m) & np.isfinite(ret)
+    if ok.sum() < 2:
+        return dict(n=int(ok.sum()), excess=None, ci=[None, None], se=None, p=None)
+    d = ret[ok] - m[ok]
+    bd = st.cluster_bootstrap(d, st.block_ids(t[ok], block), cfg.stats.bootstrap, rng)
+    bt = st.cluster_bootstrap(d, s[ok], cfg.stats.bootstrap, rng)
+    use = bd if (bd["se"] or 0) >= (bt["se"] or 0) else bt
+    se = use["se"]
+    p = float(2 * (1 - st.norm_cdf(abs(float(d.mean())) / se))) if se else None
+    dm = draws[ok]
+    draw_means = [float(dm[np.isfinite(dm[:, k]), k].mean()) if np.isfinite(dm[:, k]).any() else None
+                  for k in range(dm.shape[1])]
+    by_year = []
+    for y in sorted(set(years[ok].tolist())):
+        sel = years[ok] == y
+        if sel.sum() >= YEAR_MIN:
+            by_year.append(dict(group=int(y), n=int(sel.sum()), excess=float(d[sel].mean())))
+    pos = [g["excess"] > 0 for g in by_year]
+    return dict(n=int(ok.sum()), excess=float(d.mean()), real_mean=float(ret[ok].mean()), shifted_mean=float(m[ok].mean()),
+                ci=use["ci"], se=se, p=p, draws=draw_means, beat_share=float((d > 0).mean()), by_year=by_year,
+                positive_years=float(np.mean(pos)) if pos else None, per_event=np.where(ok, ret - m, np.nan))
 
 
 def rowmean(a: np.ndarray) -> np.ndarray:
@@ -481,7 +625,8 @@ def _groups(keys: np.ndarray, x: np.ndarray, ex: np.ndarray | None, labels) -> l
     return out
 
 
-def cell_stats(es: EEStudy, tr: pd.DataFrame, cm: np.ndarray | None, rdm: np.ndarray | None, key: str) -> dict:
+def cell_stats(es: EEStudy, tr: pd.DataFrame, cm: np.ndarray | None, rdm: np.ndarray | None, key: str,
+               tm: np.ndarray | None = None) -> dict:
     """Statistics of one cell, per partition. tr: replay rows of the cell's events (all statuses)."""
     S = es.study
     cfg = es.cfg
@@ -511,6 +656,11 @@ def cell_stats(es: EEStudy, tr: pd.DataFrame, cm: np.ndarray | None, rdm: np.nda
         if rd is not None:
             rd.pop("per_event")
         row["matched"], row["random_dates"] = m, rd
+        if tm is not None:
+            tb = timing_block(ret, tm[sel], t, s, S.index[t].year.to_numpy(), block, cfg,
+                              stream(cfg.seed, f"{key}|{p['name']}|timing", 22))
+            tb.pop("per_event", None)
+            row["timing"] = tb
         # per year and regime (all known at the signal session)
         years = S.index[t].year.to_numpy()
         row["by_year"] = _groups(years, ret, ex, int)
@@ -531,7 +681,8 @@ def cell_stats(es: EEStudy, tr: pd.DataFrame, cm: np.ndarray | None, rdm: np.nda
     return out
 
 
-def cell_trades_frame(es: EEStudy, tr: pd.DataFrame, cm: np.ndarray | None, rdm: np.ndarray | None) -> pd.DataFrame:
+def cell_trades_frame(es: EEStudy, tr: pd.DataFrame, cm: np.ndarray | None, rdm: np.ndarray | None,
+                      tm: np.ndarray | None = None) -> pd.DataFrame:
     """The stored per-event table of a cell (dates and symbols resolved, control means attached)."""
     S = es.study
     idx = S.index
@@ -551,6 +702,8 @@ def cell_trades_frame(es: EEStudy, tr: pd.DataFrame, cm: np.ndarray | None, rdm:
         out["matched_mean"] = rowmean(cm)
     if rdm is not None:
         out["random_date_mean"] = rowmean(rdm)
+    if tm is not None:
+        out["random_timing_mean"] = rowmean(tm)
     return out
 
 
@@ -688,6 +841,64 @@ def finalize(cfg: EntryExitExperimentConfig, rows: list[dict], ppy: float) -> li
                                       rule="randomization_and_bootstrap", alpha=cfg.stats.alpha,
                                       econ_annual=cfg.stats.economic_annual_excess, min_events=cfg.stats.min_trades)
     return rows
+
+
+def finalize_timing(rows: list[dict]) -> list[dict]:
+    """BH over the timing tests of each partition (cells whose plan has shiftable conditions)."""
+    by_part: dict[str, list[dict]] = {}
+    for r in rows:
+        by_part.setdefault(r["partition"], []).append(r)
+    for rs in by_part.values():
+        qs = st.benjamini_hochberg([r.get("p") for r in rs])
+        for r, q in zip(rs, qs):
+            r["q"] = q
+            r["m_tests"] = sum(1 for x in rs if x.get("p") is not None)
+    return rows
+
+
+def style_groups(es: EEStudy, per_event: dict[str, np.ndarray], styles: dict[str, str], ev_t: dict[str, np.ndarray],
+                 part_of: dict[str, np.ndarray], entry_of: dict[str, int]) -> list[dict]:
+    """Per entry, partition and exit style: the average over the style's exits of each event's timing excess, then
+    its mean with a date-block bootstrap CI, the number of exits beating their random timing, and years positive.
+    Exits of one entry share its events, so the per-event average is well defined."""
+    S = es.study
+    cfg = es.cfg
+    out = []
+    entries = sorted(set(entry_of.values()))
+    for ei in entries:
+        cells = [c for c in per_event if entry_of[c] == ei]
+        if not cells:
+            continue
+        t = ev_t[cells[0]]
+        part = part_of[cells[0]]
+        years = S.index[np.clip(t, 0, S.T - 1)].year.to_numpy()
+        for style in sorted({styles[c] for c in cells}):
+            sc = [c for c in cells if styles[c] == style]
+            M = np.vstack([per_event[c] for c in sc])
+            g = rowmean(M.T)
+            for k, pp in enumerate(S.parts):
+                sel = (part == k) & np.isfinite(g)
+                if sel.sum() < 2:
+                    continue
+                rng = stream(cfg.seed, f"style|{ei}|{style}|{pp['name']}", 23)
+                bs = st.cluster_bootstrap(g[sel], st.block_ids(t[sel], 20), cfg.stats.bootstrap, rng)
+                cell_means = []
+                for c in sc:
+                    v = per_event[c][part == k]
+                    v = v[np.isfinite(v)]
+                    if len(v):
+                        cell_means.append(float(v.mean()))
+                yrs = []
+                for y in sorted(set(years[sel].tolist())):
+                    ys = sel & (years == y)
+                    if ys.sum() >= YEAR_MIN:
+                        yrs.append(dict(group=int(y), n=int(ys.sum()), excess=float(g[ys].mean())))
+                out.append(dict(entry=ei, style=style, partition=pp["name"], role=pp["role"], exits=len(sc),
+                                n=int(sel.sum()), excess=float(g[sel].mean()), ci=bs["ci"], se=bs["se"],
+                                beat=int(sum(m > 0 for m in cell_means)), of=len(cell_means),
+                                by_year=yrs, positive_years=(float(np.mean([y["excess"] > 0 for y in yrs]))
+                                                             if yrs else None)))
+    return out
 
 
 def finalize_pairs(rows: list[dict]) -> list[dict]:
@@ -832,7 +1043,8 @@ def sensitivity(grid_cells: list[tuple[dict, str]], train: str, valid: str | Non
                 spearman_train_validation=_spearman([p["train"] for p in both], [p["validation"] for p in both]))
 
 
-__all__ = ["resolve_config", "prepare", "entry_events", "replay_cell", "cell_stats", "paired", "finalize",
+__all__ = ["RandomEntry", "all_entries", "timing_returns", "timing_block", "circular_shift", "finalize_timing",
+           "style_groups", "resolve_config", "prepare", "entry_events", "replay_cell", "cell_stats", "paired", "finalize",
            "finalize_pairs", "walk_forward", "sensitivity", "run_portfolio", "buy_and_hold", "strategy_for",
            "event_mask", "plan_series", "cell_trades_frame", "baseline_key", "expand_entries", "expand_exits",
            "EntryExitError", "Cancelled", "ResearchError", "EEStudy", "Events", "folds"]

@@ -99,19 +99,25 @@ class ResolvedPlan:
     trigger: str
     deployable: bool
     problems: list[str] = field(default_factory=list)
+    style: str = "neutral"          # strength / weakness / ... of its conditions ("mixed" when they differ)
+    shiftable: list[int] = field(default_factory=list)   # condition components with a time series (timing benchmark)
+    lookahead: bool = False         # a calibration component reads the future: never tradable
 
     def describe(self) -> dict:
         return dict(key=self.key, name=self.name, family=self.family, families=self.families, kinds=self.kinds,
                     components=self.components, fields=list(self.fields), intrabar=self.intrabar,
                     needs_benchmark=self.needs_benchmark, trigger=self.trigger, deployable=self.deployable,
-                    deploy_problems=self.problems, spec=self.spec.model_dump(mode="json"))
+                    deploy_problems=self.problems, style=self.style, shiftable=self.shiftable,
+                    lookahead=self.lookahead, spec=self.spec.model_dump(mode="json"))
 
 
 def resolve_plan(spec: ExitPlanSpec, registry: ExitRegistry | None = None) -> ResolvedPlan:
     reg = registry or default_exit_registry()
+    from strategy_lab.entryexit.components import _Panel, signal_style
     comps, fams, kinds, fields, parts = [], [], [], set(), []
-    intrabar = needs_bench = False
-    for c in spec.components:
+    intrabar = needs_bench = lookahead = False
+    shiftable = []
+    for k_, c in enumerate(spec.components):
         d = reg.get(c.id)
         p = d.resolve_params(c.params)
         if d.id == "signal_exit" and c.signal is None:
@@ -134,8 +140,13 @@ def resolve_plan(spec: ExitPlanSpec, registry: ExitRegistry | None = None) -> Re
                                                       for k, v in changed.items()) + ")" if changed else "")
         if sig:
             shown += f" [{sig.split('@')[0]}]"
+        style = signal_style(getattr(c.signal, "id", None)) if d.id == "signal_exit" else d.style
+        lookahead |= d.lookahead
+        if d.kind == "condition" and isinstance(comp, _Panel):
+            shiftable.append(k_)
         comps.append(dict(id=d.id, version=d.version, family=d.family, kind=d.kind, name=shown,
-                          params=p, weight=c.weight, signal=sig, intrabar=ib, rule=d.rule))
+                          params=p, weight=c.weight, signal=sig, intrabar=ib, rule=d.rule, style=style,
+                          lookahead=d.lookahead))
         fams.append(d.family)
         kinds.append(d.kind)
         label = d.id + ("(" + ", ".join(f"{k}={v}" for k, v in changed.items()) + ")" if changed else "")
@@ -169,10 +180,16 @@ def resolve_plan(spec: ExitPlanSpec, registry: ExitRegistry | None = None) -> Re
         problems.append(f"reads bar fields {sorted(fields - {'open', 'close'})}")
     if needs_bench:
         problems.append("reads a benchmark series")
+    if lookahead:
+        problems.append("contains a calibration rule that reads the future (benchmark checks only)")
+    cstyles = sorted({c["style"] for c in comps if c["kind"] == "condition"})
+    style = (cstyles[0] if len(cstyles) == 1 else "mixed") if cstyles else \
+        ("target" if "target" in kinds else "protective")
     return ResolvedPlan(spec=spec, key=key, name=name, family=family, families=sorted(set(fams)),
                         kinds=sorted(set(kinds)), components=comps, fields=tuple(sorted(fields | {"open", "close"})),
                         intrabar=intrabar, needs_benchmark=needs_bench, trigger="; ".join(trig),
-                        deployable=not problems, problems=problems)
+                        deployable=not problems, problems=problems, style=style, shiftable=shiftable,
+                        lookahead=lookahead)
 
 
 @dataclass

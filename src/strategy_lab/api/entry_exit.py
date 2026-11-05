@@ -47,6 +47,22 @@ def _role(d: dict) -> str:
     return "trailing" if d["family"] == "trailing" else "stop"
 
 
+class ConfigProblem(Exception):
+    """A configuration that cannot become an experiment: always a readable 422 with problems and a hint."""
+
+    def __init__(self, body: dict):
+        super().__init__(body.get("detail", ""))
+        self.body = body
+
+
+def _friendly(context: str, fn, *a):
+    from strategy_lab.api.errors import friendly_body
+    try:
+        return fn(*a)
+    except Exception as e:  # noqa: BLE001 - every configuration error becomes a readable 422
+        raise ConfigProblem(friendly_body(e, context)) from e
+
+
 def build_router(lab) -> APIRouter:
     from strategy_lab.api.app import records
 
@@ -99,7 +115,7 @@ def build_router(lab) -> APIRouter:
 
     @r.post("/validate")
     def validate(cfg: EntryExitExperimentConfig):
-        resolved, entries, plans = R.resolve(cfg)
+        resolved, entries, plans = _friendly("These settings cannot run", R.resolve, cfg)
         notes = []
         nd = [p for p in plans if not p.deployable]
         if nd:
@@ -119,12 +135,12 @@ def build_router(lab) -> APIRouter:
                     analysis_end=resolved.analysis_end.isoformat(),
                     entries=[dict(key=e.key, name=e.name, family=e.family, warmup=e.warmup) for e in entries],
                     exits=[dict(key=p.key, name=p.name, family=p.family, deployable=p.deployable,
-                                trigger=p.trigger) for p in plans],
+                                trigger=p.trigger, style=p.style, timing=bool(p.shiftable)) for p in plans],
                     periods=period_labels(resolved.start, resolved.analysis_end), notes=notes)
 
     @r.post("/experiments")
     def launch(cfg: EntryExitExperimentConfig):
-        eid = R.create(cfg)
+        eid = _friendly("The experiment could not be created", R.create, cfg)
         R.submit(eid)
         return R.get(eid)
 
@@ -176,6 +192,10 @@ def build_router(lab) -> APIRouter:
     def walk_forward(eid: str):
         return R.read_json(eid, "walk_forward.json") or {}
 
+    @r.get("/experiments/{eid}/timing")
+    def timing(eid: str):
+        return R.read_json(eid, "timing.json") or {}
+
     @r.get("/experiments/{eid}/tests")
     def tests(eid: str):
         return R.read_json(eid, "tests.json") or {}
@@ -192,7 +212,8 @@ def build_router(lab) -> APIRouter:
 
     @r.post("/import")
     def import_cell(body: EEImportRequest):
-        return lab.import_entry_exit(body.experiment_id, body.cell, body.name)
+        return _friendly("This cell cannot be imported", lab.import_entry_exit, body.experiment_id, body.cell,
+                         body.name)
 
     @r.get("/imports")
     def imports():

@@ -14,12 +14,14 @@ import { ChoiceSelect, Field, NumberInput } from "@/components/ConfigForm";
 import { XYChart } from "@/components/ResearchCharts";
 import { PALETTE } from "@/components/LineChart";
 import { Empty, ErrorState, KV, Loading, PageHeader, Panel, PeriodBadge, Stat, StatusBadge } from "@/components/common";
+import { ProblemPanel, ProgressBar } from "@/components/Progress";
 import { Button } from "@/components/ui/button";
 import { Switch, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/primitives";
 import * as fmt from "@/lib/format";
 import { navigate } from "@/lib/router";
 import { cn } from "@/lib/utils";
-import { EESubNav, cellColor, fmtMetric, pctc, qv } from "@/pages/entryexit/common";
+import { EESubNav, cellColor, eeFailure, eeProgress, fmtMetric, pctc, qv } from "@/pages/entryexit/common";
+import { TimingPanel } from "@/pages/entryexit/TimingPanel";
 import { VerdictBadge } from "@/pages/signals/common";
 
 function MatrixGrid({ m, id, filters }: { m: Matrix; id: string; filters: { entryFam: string; exitFam: string; sigOnly: boolean; minN: number } }) {
@@ -87,6 +89,7 @@ export function ExperimentView({ id }: { id: string }) {
   const cfg = exp.data?.config;
   const metrics = ["excess_matched", "excess_random_dates", "excess_bench", "mean_ret", "median_ret", "win_rate", "profit_factor", "expectancy_r", "avg_bars",
     "ret_per_session", "trade_sharpe", "mae", "mfe", "stop_rate", "target_rate", "consistency_years", "q", "n",
+    ...(cfg?.timing?.enabled ? ["timing_excess", "q_timing", "timing_beat_share"] : []),
     "cagr", "sharpe", "sortino", "max_drawdown", "calmar", "total_return", "exposure", "turnover", "trade_count", "excess_return", "excess_random_portfolio"];
   const entryNames = useMemo(() => (cfg?.resolved_entries ?? []).map((e) => e.name), [cfg]);
   const exitNames = useMemo(() => (cfg?.resolved_exits ?? []).map((e) => e.name), [cfg]);
@@ -113,13 +116,16 @@ export function ExperimentView({ id }: { id: string }) {
         <Stat label="Prior experiments on these partitions" value={fmt.int(exp.data.prior_usage.reduce((a, b) => Math.max(a, b.experiments), 0))} hint="earlier entry-exit experiments that used the same partitions (the search is cumulative)" />
         <Stat label="Supported (train / validation)" value={`${meta.summary?.verdicts?.train?.supported ?? 0} / ${meta.summary?.verdicts?.validation?.supported ?? 0}`} />
       </div>
-      {meta.error && <ErrorState error={meta.error} />}
-      {!done ? <Loading rows={6} /> : (
+      {running && <ProgressBar {...eeProgress(meta, cfg.portfolio.run)} startedAt={meta.started_at_utc} />}
+      {meta.status === "failed" && <ProblemPanel {...eeFailure(meta)} />}
+      {meta.status === "cancelled" && <div className="rounded-md border border-warn/40 bg-warn/5 px-3 py-2 text-xs">Cancelled{meta.error ? `: ${meta.error}` : ""}. Results finished before the cancellation are shown; multiple-testing corrections cover only them.</div>}
+      {!done ? null : (
         <Tabs defaultValue="matrix">
           <TabsList>
             <TabsTrigger value="matrix">Performance matrix</TabsTrigger>
             <TabsTrigger value="hold-entry">Same entry, different exits</TabsTrigger>
             <TabsTrigger value="hold-exit">Same exit, different entries</TabsTrigger>
+            <TabsTrigger value="timing">Exit timing vs random</TabsTrigger>
             <TabsTrigger value="wf">Walk-forward & sensitivity</TabsTrigger>
             <TabsTrigger value="about">Methodology</TabsTrigger>
           </TabsList>
@@ -170,6 +176,10 @@ export function ExperimentView({ id }: { id: string }) {
               </div>
             </Panel>
           </TabsContent>
+          <TabsContent value="timing">
+            <div className="mb-2 flex items-end gap-2"><Field label="Partition"><ChoiceSelect value={part} onChange={setPartition} className="h-7 w-32 text-xs" options={parts.map((x) => ({ value: x, label: x }))} aria-label="timing partition" /></Field></div>
+            <TimingPanel id={id} exp={exp.data} part={part} />
+          </TabsContent>
           <TabsContent value="wf">
             <WalkForwardPanel id={id} wf={wf.data} entryNames={entryNames} exitNames={exitNames} />
           </TabsContent>
@@ -178,6 +188,7 @@ export function ExperimentView({ id }: { id: string }) {
               <KV rows={[
                 ["Events", `${cfg.sampling.mode} sampling; entry at the next open; eligibility: price >= ${cfg.eligibility.min_price}, $ volume >= ${fmt.usd(cfg.eligibility.min_dollar_volume, { compact: true })}, history >= ${cfg.eligibility.min_history}`],
                 ["Exits", `max holding ${cfg.max_hold} sessions; R reference ${cfg.ref_atr_mult} x ATR(${cfg.ref_atr_n}); stop-first on same-bar stop/target; the entry session is protected after the fill`],
+                ["Exit timing", cfg.timing?.enabled ? `each condition exit replayed ${cfg.timing.draws} times with its signals moved to random dates on the same stock${cfg.calibration?.enabled ? "; calibration rules on (placebos and a cheating rule)" : ""}${cfg.random_entries?.enabled ? `; random entries: ${cfg.random_entries.n}` : ""}` : "off"],
                 ["Controls", `${cfg.controls.draws} matched random stocks per event (volatility groups ${cfg.matching.vol_groups}${cfg.matching.sector ? ", sector" : ""}) and ${cfg.controls.date_draws} random dates of the same stock, replayed with the same exit; ${cfg.controls.permutations} permutations`],
                 ["Portfolio", `event-driven engine per partition; ${cfg.portfolio.sizing.mode} sizing (${cfg.portfolio.sizing.mode === "risk" ? `${fmt.pct(cfg.portfolio.sizing.risk_per_position, 1, false)} risk` : `${fmt.pct(cfg.portfolio.sizing.position_weight, 0, false)} weight`}), max ${cfg.portfolio.max_positions} positions, ${cfg.portfolio.random_controls} random-entry portfolios per cell`],
                 ["Costs", `slippage ${cfg.execution.slippage_bps} bps; commission ${cfg.execution.commission.bps} bps + $${cfg.execution.commission.per_share}/sh; spread ${cfg.execution.spread.model}`],

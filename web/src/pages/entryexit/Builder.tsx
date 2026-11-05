@@ -7,7 +7,7 @@ import { CheckCircle2, Play, Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
-import { ApiError } from "@/api/client";
+import { describeError } from "@/api/client";
 import {
   useEECatalog, useEEConfigs, useEELaunch, useEEOptions, useEESaveConfig, useEEValidate,
   type EEConfig, type ExitComponentSpec, type ExitPlanSpec, type ValidateResult,
@@ -15,7 +15,8 @@ import {
 import { useDatasets, useUniverses } from "@/api/hooks";
 import type { AnySpec, CombinationSpec } from "@/api/signals";
 import { ChoiceSelect, ExecutionEditor, Field, NumberInput, ParamsEditor } from "@/components/ConfigForm";
-import { ErrorState, KV, Loading, PageHeader, Panel, PeriodBadge } from "@/components/common";
+import { KV, Loading, PageHeader, Panel, PeriodBadge } from "@/components/common";
+import { ProblemPanel } from "@/components/Progress";
 import { Button } from "@/components/ui/button";
 import { Input, Switch } from "@/components/ui/primitives";
 import { navigate, useLocation } from "@/lib/router";
@@ -93,7 +94,7 @@ export function Builder() {
   const save = useEESaveConfig();
   const { search } = useLocation();
   const [cfg, setCfg] = useState<EEConfig | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
+  const [problem, setProblem] = useState<ReturnType<typeof describeError> | null>(null);
   const [check, setCheck] = useState<ValidateResult | null>(null);
   const [universeMode, setUniverseMode] = useState<"named" | "custom">("named");
   const [symbols, setSymbols] = useState("");
@@ -113,7 +114,7 @@ export function Builder() {
     const saved = search.get("config");
     if (saved && configs.data) {
       const c = configs.data.find((x) => x.config_id === saved);
-      if (c) { setCfg(c.config); return; }
+      if (c) { setCfg({ ...(opts.data.defaults as EEConfig), ...c.config }); return; }
     }
     const ds = datasets.data.find((d) => d.id === "us_core" && d.cached)?.id ?? datasets.data.find((d) => d.cached)?.id ?? datasets.data[0]?.id ?? "";
     const last = datasets.data.find((d) => d.id === ds)?.current?.last_date ?? opts.data.policy.ceiling;
@@ -129,7 +130,7 @@ export function Builder() {
   const exitMap = useMemo(() => new Map((cat.data?.exits ?? []).map((e) => [e.id, e])), [cat.data]);
   const sigName = useMemo(() => new Map([...(cat.data?.entry_signals ?? []), ...(cat.data?.exit_signals ?? [])].map((s) => [s.id, s.name])), [cat.data]);
 
-  if (!cfg || !opts.data || !cat.data) return <div className="space-y-3"><PageHeader title="Experiment Builder" /><EESubNav />{problem ? <ErrorState error={problem} /> : <Loading rows={10} />}</div>;
+  if (!cfg || !opts.data || !cat.data) return <div className="space-y-3"><PageHeader title="Experiment Builder" /><EESubNav />{problem ? <ProblemPanel {...problem} /> : <Loading rows={10} />}</div>;
   const c = cat.data;
   const set = (patch: Partial<EEConfig>) => { setCfg({ ...cfg, ...patch }); setCheck(null); };
   const final = (): EEConfig => {
@@ -138,9 +139,35 @@ export function Builder() {
     if (out.partition_scheme !== "custom") out.partitions = [];
     return out;
   };
-  const report = (e: unknown) => { const m = e instanceof ApiError ? e.message : String(e); setProblem(m); toast.error(m); };
-  const doValidate = () => validate.mutate(final(), { onSuccess: (r) => { setProblem(null); setCheck(r); toast.success(`${r.n_entries} entries x ${r.n_exits} exits = ${r.n_cells} cells`); }, onError: report });
-  const doLaunch = () => launch.mutate(final(), { onSuccess: (r) => navigate(`/entry-exit/experiments/${r.experiment_id}`), onError: report });
+  const report = (e: unknown) => { const d = describeError(e); setProblem(d); toast.error(d.title); };
+  /** Checks that need no server: they explain the most common mistakes before anything is sent. */
+  const preflight = (c: EEConfig): string[] => {
+    const out: string[] = [];
+    if (!c.entries.length && !c.entry_families.length && !c.entry_grids.length && !c.random_entries.enabled)
+      out.push("Add at least one entry signal, a signal family, an entry grid, or turn on random entries.");
+    if (!c.exits.length && !c.exit_ids.length && !c.exit_families.length && !c.exit_grids.length && !c.calibration.enabled)
+      out.push("Add at least one exit: a catalog exit, an exit family, a composed plan or a parameter sweep.");
+    if (plan.components.length) out.push(`The plan being composed (${plan.components.map((x) => x.id).join(" + ")}) has not been added: press "Add plan" or remove its components.`);
+    if (c.start >= c.end) out.push(`The start date (${c.start}) must be before the end date (${c.end}).`);
+    if (opts.data && c.end > opts.data.policy.ceiling) out.push(`The end date ${c.end} is after the data ceiling ${opts.data.policy.ceiling} (2026 onward is HOLDOUT data).`);
+    if (universeMode === "custom" && (c.universe ?? []).length < 2) out.push("A custom universe needs at least two symbols (comma or space separated).");
+    for (const s of c.entries) if (s.kind === "combination" && s.components.length < 2) out.push(`Combination "${s.name}" needs at least two components.`);
+    for (const x of c.exits) for (const comp of x.components)
+      if (comp.id === "signal_exit" && !comp.signal) out.push(`Plan "${x.name || x.components.map((y) => y.id).join(" + ")}": the "Any catalog signal" exit needs a signal chosen.`);
+    return out;
+  };
+  const guarded = (go: (c: EEConfig) => void) => {
+    const c = final();
+    const pre = preflight(c);
+    if (pre.length) {
+      setProblem({ title: "Please fix these settings", message: `${pre.length} thing${pre.length > 1 ? "s" : ""} to fix before the experiment can be checked:`, problems: pre, hint: null });
+      toast.error("Please fix the highlighted settings");
+      return;
+    }
+    go(c);
+  };
+  const doValidate = () => guarded((c) => validate.mutate(c, { onSuccess: (r) => { setProblem(null); setCheck(r); toast.success(`${r.n_entries} entries x ${r.n_exits} exits = ${r.n_cells} cells`); }, onError: report }));
+  const doLaunch = () => guarded((c) => launch.mutate(c, { onSuccess: (r) => navigate(`/entry-exit/experiments/${r.experiment_id}`), onError: report }));
   const famCount = (f: string) => c.signal_families.find((x) => x.id === f)?.n_signals ?? 0;
   const nEntries = cfg.entries.length + cfg.entry_families.reduce((a, f) => a + famCount(f), 0) + cfg.entry_grids.reduce((a, g) => a + Object.values(g.grid).reduce((b, v) => b * v.length, 1), 0);
   const nExits = cfg.exits.length + cfg.exit_ids.length + cfg.exit_families.reduce((a, f) => a + (c.exit_families.find((x) => x.id === f)?.n_exits ?? 0), 0)
@@ -162,7 +189,7 @@ export function Builder() {
           <Button size="sm" onClick={doLaunch} disabled={launch.isPending} data-action="launch"><Play className="size-3.5" />Launch</Button>
         </>} />
       <EESubNav />
-      {problem && <ErrorState error={problem} />}
+      {problem && <ProblemPanel {...problem} />}
       <div className="grid gap-3 xl:grid-cols-[1fr_380px]">
         <div className="space-y-3">
           <Panel title={`Entry signals (${nEntries})`}>
@@ -282,6 +309,16 @@ export function Builder() {
                 <Field label="Trade notional (replay)" hint="per-trade notional used for per-share and per-order commissions in the trade replay"><NumberInput value={cfg.trade_notional} min={1} onChange={(v) => set({ trade_notional: v ?? 10000 })} /></Field>
               </div>
               <ExecutionEditor value={cfg.execution} onChange={(e) => set({ execution: e })} />
+            </div>
+          </Panel>
+
+          <Panel title="Random entries and the random-timing exit benchmark" info="The exit video's design: random entries, every exit compared with its own sell signals moved to random dates on the same stock, and calibration rules that check the benchmark">
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+              <Field label="Random entries" hint="add a cohort of random stock-sessions (bought at the next open) as an entry: exits are then judged without any entry signal"><div className="flex h-8 items-center"><Switch checked={cfg.random_entries.enabled} onCheckedChange={(x) => set({ random_entries: { ...cfg.random_entries, enabled: x } })} aria-label="random entries" /></div></Field>
+              <Field label="Number of random entries"><NumberInput value={cfg.random_entries.n} min={100} max={500000} onChange={(v) => set({ random_entries: { ...cfg.random_entries, n: v ?? 20000 } })} /></Field>
+              <Field label="Random-timing benchmark" hint="each exit's own condition signals moved to random dates on the same stock (same count, same spacing); the same entries are replayed"><div className="flex h-8 items-center"><Switch checked={cfg.timing.enabled} onCheckedChange={(x) => set({ timing: { ...cfg.timing, enabled: x } })} aria-label="timing benchmark" /></div></Field>
+              <Field label="Shifted copies per exit"><NumberInput value={cfg.timing.draws} min={2} max={100} onChange={(v) => set({ timing: { ...cfg.timing, draws: v ?? 10 } })} /></Field>
+              <Field label="Calibration rules" hint="adds placebo exits (random-day sells: must score about zero) and a cheating rule that knows tomorrow's drop (must be detected); never tradable"><div className="flex h-8 items-center"><Switch checked={cfg.calibration.enabled} onCheckedChange={(x) => set({ calibration: { ...cfg.calibration, enabled: x } })} aria-label="calibration" /></div></Field>
             </div>
           </Panel>
 

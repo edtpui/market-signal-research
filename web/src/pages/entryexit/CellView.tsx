@@ -23,9 +23,9 @@ import { VerdictBadge } from "@/pages/signals/common";
 
 const P = (v: number | null | undefined, d = 2) => fmt.pct(v, d);
 
-function TradeStats({ s }: { s: CellPartition }) {
+function TradeStats({ s, timingQ }: { s: CellPartition; timingQ?: number | null }) {
   if (!s.n) return <Empty title="No trades in this partition" />;
-  const m = s.matched, rd = s.random_dates;
+  const m = s.matched, rd = s.random_dates, tm = s.timing;
   return (
     <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8">
       <Stat label="Trades" value={fmt.int(s.n)} sub={`${s.n_dates} signal sessions`} />
@@ -38,6 +38,9 @@ function TradeStats({ s }: { s: CellPartition }) {
       <Stat label="Tail" value={P(s.q05)} sub={`CVaR5 ${P(s.cvar05)} · worst ${P(s.worst)}`} tone="text-neg" />
       <Stat label="Excess vs matched random" value={P(m?.excess)} tone={fmt.tone(m?.excess)} sub={m?.ci ? `[${P(m.ci[0])}, ${P(m.ci[1])}] p ${m.p?.toFixed(3) ?? "—"}` : ""} hint="the same exit replayed on random stocks of the same session and matching group" />
       <Stat label="Excess vs random dates" value={P(rd?.excess)} tone={fmt.tone(rd?.excess)} sub={rd?.p !== undefined && rd?.p !== null ? `p ${rd.p.toFixed(3)}` : ""} />
+      {tm && <Stat label="Excess vs random timing" value={P(tm.excess)} tone={fmt.tone(tm.excess)}
+        sub={`${tm.ci ? `[${P(tm.ci[0])}, ${P(tm.ci[1])}] ` : ""}p ${tm.p?.toFixed(3) ?? "—"}${timingQ !== undefined && timingQ !== null ? ` q ${timingQ.toFixed(3)}` : ""}`}
+        hint={`this exit's sell signals moved to random dates on the same stock (same count and spacing), replayed on the same entries; real ${P(tm.real_mean)} vs shifted ${P(tm.shifted_mean)}; ${fmt.pct(tm.beat_share, 0, false)} of trades beat their random timing`} />}
       <Stat label="Excess vs benchmark" value={P(s.excess_bench)} tone={fmt.tone(s.excess_bench)} sub={`benchmark ${P(s.bench_ret)}`} hint="the benchmark over the same holding windows (buy-and-hold over equivalent intervals)" />
       <Stat label="Exit mix" value={`${fmt.pct(s.stop_rate, 0, false)} stop`} sub={`${fmt.pct(s.target_rate, 0, false)} target · ${fmt.pct(s.condition_rate, 0, false)} cond · ${fmt.pct(s.max_hold_rate, 0, false)} cap`} />
       <Stat label="Partial exits" value={fmt.pct(s.partial_rate, 0, false)} sub={`period-end ${fmt.pct(s.period_end_rate, 1, false)}`} />
@@ -124,7 +127,7 @@ export function CellView({ id, cell }: { id: string; cell: string }) {
             onError: (e) => toast.error(String(e)) })} data-action="import"><Library className="size-3.5" />Import to Strategy Library</Button>
         </>} />
       <EESubNav />
-      {s && <TradeStats s={s} />}
+      {s && <TradeStats s={s} timingQ={c.data?.timing_tests?.find((t) => t.partition === part)?.q} />}
       <div className="grid gap-3 xl:grid-cols-[1fr_380px]">
         <div className="space-y-3">
           <Panel title="Portfolio backtest (event-driven engine)" info="the cell's events of this partition run through the existing engine with capital, sizing, the position cap and costs; positions open at the end are marked to market">

@@ -3,7 +3,7 @@
 // trigger semantics every experiment uses.
 import { useMemo, useState } from "react";
 
-import { useEECatalog, type ExitInfo } from "@/api/entryExit";
+import { STYLE_INFO, STYLE_LABEL, useEECatalog, type ExitInfo } from "@/api/entryExit";
 import { DataTable, type Col } from "@/components/DataTable";
 import { Empty, ErrorState, Loading, PageHeader, Panel } from "@/components/common";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +23,7 @@ export function ExitLibrary() {
   const cols: Col<ExitInfo>[] = [
     { id: "name", header: "Exit", value: (r) => r.name, cell: (r) => <span className="font-medium">{r.name}<span className="ml-1.5 text-2xs text-muted-foreground">{r.id}</span></span> },
     { id: "family", header: "Family", value: (r) => r.family },
+    { id: "style", header: "Style", value: (r) => r.style ?? "", cell: (r) => <span className={cn("text-2xs", r.style === "calibration" ? "text-warn" : "text-muted-foreground")} title={STYLE_INFO[r.style ?? ""]}>{STYLE_LABEL[r.style ?? ""] ?? r.style}</span> },
     { id: "kind", header: "Kind", value: (r) => r.kind, cell: (r) => <Badge variant="outline" className="h-5 rounded-sm px-1.5 text-2xs">{r.kind}</Badge> },
     { id: "rule", header: "Rule", value: (r) => r.rule, cell: (r) => <span className="text-xs text-muted-foreground">{r.rule}</span> },
     { id: "exec", header: "Execution", value: (r) => (r.intrabar ? "intrabar order" : "next open"),
@@ -65,6 +66,10 @@ export function ExitLibrary() {
               <div className="space-y-2 text-xs">
                 <div>{sel.rule}</div>
                 {sel.doc && <div className="text-muted-foreground">{sel.doc}</div>}
+                {sel.style && <div className="text-muted-foreground">Style: {STYLE_LABEL[sel.style] ?? sel.style} ({STYLE_INFO[sel.style]}){sel.shiftable ? " · covered by the random-timing benchmark" : ""}</div>}
+                {sel.family === "calibration" && <div className="rounded-sm border border-warn/40 bg-warn/5 px-2 py-1 text-warn">
+                  Calibration rule: {sel.lookahead ? "it reads tomorrow's price, which no real rule can; it exists to prove the benchmark detects a rule with genuine timing skill. Strategies and imports refuse it." : "it sells on random days; a trustworthy benchmark must score it near zero."} Enable it with "Calibration rules" in the builder.
+                </div>}
                 <div className="text-muted-foreground">Bar fields: {sel.fields.join(", ")} · warm-up {sel.warmup} sessions{sel.needs_benchmark ? " · reads the benchmark" : ""}</div>
                 <table className="w-full text-2xs">
                   <tbody>{Object.entries(sel.params).map(([k, p]) => (

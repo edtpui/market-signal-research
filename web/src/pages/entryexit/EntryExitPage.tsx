@@ -3,12 +3,13 @@
 import { useEEExperiments } from "@/api/entryExit";
 import { DataTable } from "@/components/DataTable";
 import { ErrorState, Loading, PageHeader, Panel, PeriodBadge, StatusBadge } from "@/components/common";
+import { ProgressBar } from "@/components/Progress";
 import { Button } from "@/components/ui/button";
 import * as fmt from "@/lib/format";
 import { navigate, type EEView } from "@/lib/router";
 import { Builder } from "@/pages/entryexit/Builder";
 import { CellView } from "@/pages/entryexit/CellView";
-import { EESubNav } from "@/pages/entryexit/common";
+import { EESubNav, eeProgress } from "@/pages/entryexit/common";
 import { ExitLibrary } from "@/pages/entryexit/ExitLibrary";
 import { ExperimentView } from "@/pages/entryexit/ExperimentView";
 import { Leaderboards } from "@/pages/entryexit/Leaderboards";
@@ -31,7 +32,9 @@ function History() {
               { id: "data", header: "Data", value: (r) => `${r.dataset} ${r.universe_name ?? ""} (${r.n_symbols})` },
               { id: "window", header: "Window", value: (r) => `${r.start}..${r.analysis_end}` },
               { id: "periods", header: "Periods", value: (r) => r.periods.join(","), cell: (r) => <span className="flex gap-1">{r.periods.map((p) => <PeriodBadge key={p} period={p} />)}</span> },
-              { id: "progress", header: "Progress", value: (r) => r.progress_done, cell: (r) => <span className="num text-2xs">{r.stage ?? ""} {r.progress_done}/{r.progress_total}</span> },
+              { id: "progress", header: "Progress", value: (r) => r.progress_done, cell: (r) => (r.status === "running" || r.status === "queued")
+                ? <ProgressBar compact {...eeProgress(r)} />
+                : <span className="text-2xs text-muted-foreground">{r.status === "failed" ? `stopped at ${r.stage ?? "start"}` : r.status === "done" && r.summary ? `${r.summary.seconds}s` : ""}</span> },
               { id: "test", header: "Test spent", value: (r) => (r.evaluate_test ? "yes" : "no") },
               { id: "repro", header: "Reproduction", value: (r) => (r.reproduction ? `${r.reproduction.identical}/${r.reproduction.cells}` : "") },
             ]} />

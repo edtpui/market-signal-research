@@ -1,6 +1,7 @@
 // Research History: every signal experiment (never overwritten; reproductions are experiments of their own) with its
 // status, scope and verdicts, and the research-integrity ledgers: how often each dataset partition has been used,
 // and every evaluation of a locked test period. Imported signals are listed with their Strategy Library ids.
+import { ProgressBar } from "@/components/Progress";
 import { useMemo, useState } from "react";
 
 import { useImports, useSignalExperiments, useUsage, type ExperimentRow } from "@/api/signals";
@@ -16,7 +17,9 @@ const cols: Col<ExperimentRow>[] = [
   { id: "name", header: "Experiment", value: (r) => r.name || r.experiment_id, cell: (r) => <div><div className="font-medium">{r.name || "unnamed"}</div><div className="num text-2xs text-muted-foreground">{r.experiment_id}</div></div> },
   { id: "kind", header: "Kind", value: (r) => r.kind, cell: (r) => <span className={r.kind === "reproduction" ? "text-primary" : ""}>{r.kind}</span> },
   { id: "status", header: "Status", value: (r) => r.status, cell: (r) => <StatusBadge status={r.status} /> },
-  { id: "progress", header: "Signals", align: "right", value: (r) => r.n_signals, cell: (r) => <span className="num">{r.progress_done}{r.progress_failed ? `+${r.progress_failed}✕` : ""}/{r.n_signals}</span> },
+  { id: "progress", header: "Signals", align: "right", value: (r) => r.n_signals, cell: (r) => (r.status === "running" || r.status === "queued")
+    ? <ProgressBar compact value={r.n_signals ? (r.progress_done + r.progress_failed) / r.n_signals : null} />
+    : <span className="num">{r.progress_done}{r.progress_failed ? `+${r.progress_failed}✕` : ""}/{r.n_signals}</span> },
   { id: "data", header: "Data", value: (r) => `${r.dataset} ${r.universe_name}`, cell: (r) => <span className="text-2xs">{r.dataset} · {r.universe_name ?? "custom"} (<span className="num">{r.n_symbols}</span>)</span> },
   { id: "window", header: "Window", value: (r) => r.start, cell: (r) => <span className="num text-2xs">{r.start} … {r.analysis_end}</span> },
   { id: "test", header: "Test period", value: (r) => r.evaluate_test, cell: (r) => (r.evaluate_test ? <span className="text-warn">evaluated</span> : <span className="text-muted-foreground">locked</span>) },

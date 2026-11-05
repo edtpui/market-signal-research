@@ -52,6 +52,40 @@ class Controls(BaseModel):
     permutations: int = Field(1000, ge=100, le=20000)
 
 
+class RandomEntries(BaseModel):
+    """A random-entry cohort (the 0RRXFUA-72M design): n stock-sessions drawn uniformly, without replacement, from
+    the eligible cells of the analysis window, bought at the next open. Every exit plan gets the same draws."""
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    n: int = Field(20000, ge=100, le=500_000)
+
+
+class Timing(BaseModel):
+    """The random-timing exit benchmark (0RRXFUA-72M): each plan's condition signals are moved to random dates on
+    the same stock (a circular shift of the stock's signal series by a random offset: the same stock, the same number
+    of signals and the same spacing; only the timing is random) and the same entries are replayed. The excess of the
+    real plan over its shifted copies is the value of the exit's timing. Stops and targets stay as they are."""
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = True
+    draws: int = Field(10, ge=2, le=100)
+
+
+class Calibration(BaseModel):
+    """Benchmark checks added as exit plans: placebo rules selling on random days (they must score zero against the
+    timing benchmark) and a cheating rule that knows tomorrow's drop (it must be detected). Never tradable."""
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    placebo_probs: list[float] = Field(default_factory=lambda: [0.01, 0.03, 0.1])
+    oracle_drop: float = Field(0.03, gt=0, lt=0.5)
+
+    @field_validator("placebo_probs")
+    @classmethod
+    def _probs(cls, v):
+        if any(not 0 < x < 0.5 for x in v) or len(v) > 6:
+            raise ValueError("placebo probabilities must be between 0 and 0.5 (at most 6)")
+        return v
+
+
 class Portfolio(BaseModel):
     """The event-driven backtests of the cells (existing engine, one run per cell and partition)."""
     model_config = ConfigDict(extra="forbid")
@@ -93,6 +127,7 @@ class EntryExitExperimentConfig(BaseModel):
     entries: list[SpecItem] = Field(default_factory=list)
     entry_families: list[str] = Field(default_factory=list, description="every bullish catalog signal of a family")
     entry_grids: list[GridSpec] = Field(default_factory=list)
+    random_entries: RandomEntries = Field(default_factory=RandomEntries)
     # exits
     exits: list[ExitPlanSpec] = Field(default_factory=list)
     exit_ids: list[str] = Field(default_factory=list, description="catalog exits, one single-component plan each")
@@ -126,6 +161,8 @@ class EntryExitExperimentConfig(BaseModel):
                                                               "per-order commissions)")
     portfolio: Portfolio = Field(default_factory=Portfolio)
     controls: Controls = Field(default_factory=Controls)
+    timing: Timing = Field(default_factory=Timing)
+    calibration: Calibration = Field(default_factory=Calibration)
     # validation
     partition_scheme: Literal["default", "none", "custom"] = "default"
     partitions: list[Partition] = Field(default_factory=list)
@@ -169,9 +206,11 @@ class EntryExitExperimentConfig(BaseModel):
             raise ValueError("start is after end")
         if not self.universe and not self.universe_name:
             raise ValueError("give a universe (symbols) or a universe_name")
-        if not (self.entries or self.entry_families or self.entry_grids or self.resolved_entries):
-            raise ValueError("select at least one entry signal, family or grid")
-        if not (self.exits or self.exit_ids or self.exit_families or self.exit_grids or self.resolved_exits):
+        if not (self.entries or self.entry_families or self.entry_grids or self.resolved_entries
+                or self.random_entries.enabled):
+            raise ValueError("select at least one entry signal, family or grid, or turn on random entries")
+        if not (self.exits or self.exit_ids or self.exit_families or self.exit_grids or self.resolved_exits
+                or self.calibration.enabled):
             raise ValueError("select at least one exit, exit family or exit grid")
         if self.sampling.mode == "non_overlapping":
             raise ValueError("sampling non_overlapping is horizon-specific; use first, all or cooldown")
@@ -197,6 +236,7 @@ class EntryExitExperimentConfig(BaseModel):
                     ref_atr_mult=self.ref_atr_mult, execution=self.execution.model_dump(mode="json"),
                     trade_notional=self.trade_notional, controls=self.controls.model_dump(),
                     portfolio=self.portfolio.model_dump(mode="json"), stats=self.stats.model_dump(),
+                    timing=self.timing.model_dump(),
                     protective=[c.model_dump(mode="json") for c in self.protective], seed=self.seed)
 
     def methodology_hash(self) -> str:

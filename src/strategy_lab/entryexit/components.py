@@ -41,7 +41,43 @@ FAMILIES = {
     "price_action": ("Momentum and price-action exits", "Exits from candle sequences, swing structure and the "
                                                         "position's own path since entry."),
     "time": ("Time-based exits", "Exits after a holding period or when the trade thesis expires."),
+    "calibration": ("Benchmark calibration", "Rules that know nothing (random-day sells) or know the future (a "
+                                             "cheating rule): they check that a benchmark scores zero when there is "
+                                             "no information and detects it when there is. Never tradable."),
 }
+# How an exit relates to the recent move (the 0RRXFUA-72M video's split): strength sells after a run-up or when the
+# price is stretched above a band or overbought; weakness sells after a drop, a break below an average, a channel or
+# a low. Stops, targets, time and position-path exits are classified separately.
+STYLES = ("strength", "weakness", "neutral", "time", "protective", "target", "calibration")
+# bearish catalog signals used as exit signals (signal_exit), by style
+STRENGTH_SIGNALS = frozenset({
+    "rsi14_above_70", "rsi14_above_80", "rsi14_cross_below_70", "rsi2_above_90", "rsi_bear_divergence",
+    "stoch_overbought", "stoch_bear_cross_overbought", "willr_overbought", "willr_exit_overbought",
+    "cci_overbought_reversal", "uo_overbought", "uo_cross_below_70", "mfi_overbought", "bb_upper_reentry",
+    "keltner_upper_reentry", "zscore_above", "three_up_days", "ibs_high", "short_term_winner_decile",
+    "dist_sma50_far_above", "consecutive_up_closes", "breadth_overheated", "mom_bear_divergence",
+    "price_volume_divergence"})
+WEAKNESS_SIGNALS = frozenset({
+    "sma_10_20_cross_down", "sma_20_50_cross_down", "death_cross_50_200", "ema_9_21_cross_down", "sma50_break_below",
+    "sma200_break_below", "breakdown_20d", "breakdown_52w", "donchian_breakdown", "keltner_breakdown",
+    "donchian_mid_cross_down", "macd_signal_cross_down", "macd_zero_cross_down", "roc_cross_zero_down",
+    "trix_zero_cross_down", "trix_signal_cross_down", "adx_trend_down", "di_cross_down", "aroon_cross_down",
+    "aroon_down_strong", "psar_flip_down", "ichimoku_tk_cross_down", "ichimoku_cloud_breakdown",
+    "linreg_strong_downtrend", "vortex_cross_down", "ha_flip_down", "mom_20d_bottom_decile", "mom_12_1_bottom_decile",
+    "cci_breakdown", "rs_line_new_low", "rs_cross_below_sma", "rs_underperformance", "obv_cross_down",
+    "cmf_cross_down", "gap_down", "gap_down_continuation", "gap_down_large_atr", "gap_down_rvol",
+    "vol_breakout_down", "wide_range_bar_down", "chandelier_flip_down", "atr_expansion_down", "near_52w_low",
+    "pivot_s1_breakdown", "bb_squeeze_breakout_down", "nr7_breakout_down", "squeeze_fire_down",
+    "sma20_loss_after_uptrend", "inside_bar_breakdown_down", "inside_bar_breakout_down", "outside_bar_down",
+    "consecutive_down_closes", "rvol_down_day", "laggard_in_strong_market"})
+
+
+def signal_style(signal_id: str | None) -> str:
+    if signal_id in STRENGTH_SIGNALS:
+        return "strength"
+    if signal_id in WEAKNESS_SIGNALS:
+        return "weakness"
+    return "neutral"
 TRIGGER = Param("intrabar", "choice", choices=("intrabar", "close"),
                 description="intrabar: a resting stop order; close: the close at or below the level sells at the "
                             "next open (market orders only)")
@@ -126,19 +162,25 @@ class ExitDef:
     params: dict[str, Param] = field(default_factory=dict)
     doc: str = ""
     version: str = "1.0"
+    style: str = "neutral"
+    lookahead: bool = False        # reads future bars on purpose (calibration only): never tradable
 
     def __post_init__(self):
         if not re.fullmatch(r"[a-z0-9_]+", self.id):
             raise ValueError(f"exit id {self.id!r}: use lowercase letters, digits and _")
-        if self.family not in FAMILIES or self.kind not in KINDS:
-            raise ValueError(f"{self.id}: bad family/kind {self.family}/{self.kind}")
+        if self.family not in FAMILIES or self.kind not in KINDS or self.style not in STYLES:
+            raise ValueError(f"{self.id}: bad family/kind/style {self.family}/{self.kind}/{self.style}")
 
     def resolve_params(self, params: dict | None) -> dict:
         params = dict(params or {})
         unknown = set(params) - set(self.params)
         if unknown:
-            raise ParamError(f"exit {self.id}: unknown parameters {sorted(unknown)}")
-        return {k: spec.validate(k, params[k] if k in params else spec.default) for k, spec in self.params.items()}
+            raise ParamError(f"exit '{self.name}' ({self.id}) has no parameter {', '.join(sorted(unknown))} "
+                             f"(its parameters: {', '.join(self.params) or 'none'})")
+        try:
+            return {k: spec.validate(k, params[k] if k in params else spec.default) for k, spec in self.params.items()}
+        except ParamError as e:
+            raise ParamError(f"exit '{self.name}' ({self.id}), parameter {e}") from None
 
     def build(self, uid: str, params: dict, common: Common, extra: dict | None = None) -> Comp:
         return self.impl(uid, self.resolve_params(params), common, extra)
@@ -151,7 +193,8 @@ class ExitDef:
         return dict(id=self.id, version=self.version, family=self.family, kind=self.kind, name=self.name,
                     rule=self.rule, doc=self.doc, params={k: v.describe() for k, v in self.params.items()},
                     fields=fields, needs_benchmark=comp.needs_benchmark, warmup=comp.warmup(),
-                    intrabar=self.kind == "target" or (self.kind == "stop" and p.get("trigger") == "intrabar"))
+                    intrabar=self.kind == "target" or (self.kind == "stop" and p.get("trigger") == "intrabar"),
+                    style=self.style, lookahead=self.lookahead, shiftable=isinstance(comp, _Panel))
 
 
 class ExitRegistry:
@@ -357,6 +400,98 @@ class SignalExit(_Panel):
 
     def warmup(self):
         return int(self._r.warmup) if self._r is not None else 1
+
+
+class Supertrend(_Panel):
+    """Supertrend (ATR bands around the bar midpoint, ratcheted while the trend lasts); the exit fires when the close
+    crosses below the line, i.e. when the trend flips down."""
+    fields = ("high", "low", "close")
+
+    def frame(self, ind):
+        n, m = self.p["n"], self.p["mult"]
+        key = ("supertrend", n, m)
+
+        def calc():
+            h, lo, c = ind.high.to_numpy(float), ind.low.to_numpy(float), ind.close.to_numpy(float)
+            atr = ind.atr(n).to_numpy(float)
+            mid = (h + lo) / 2.0
+            up, dn = mid + m * atr, mid - m * atr
+            T, S = c.shape
+            fu, fl = np.full(S, np.nan), np.full(S, np.nan)          # final upper / lower band
+            trend = np.zeros(S)                                       # +1 up, -1 down, 0 unknown
+            pc = np.full(S, np.nan)
+            out = np.zeros((T, S), bool)
+            for t in range(T):
+                ok = np.isfinite(up[t]) & np.isfinite(dn[t]) & np.isfinite(c[t])
+                with np.errstate(invalid="ignore"):
+                    nfu = np.where(np.isnan(fu) | (up[t] < fu) | (pc > fu), up[t], fu)
+                    nfl = np.where(np.isnan(fl) | (dn[t] > fl) | (pc < fl), dn[t], fl)
+                    ntrend = np.where(trend == 0, np.where(c[t] >= nfl, 1.0, -1.0),
+                                      np.where((trend > 0) & (c[t] < nfl), -1.0,
+                                               np.where((trend < 0) & (c[t] > nfu), 1.0, trend)))
+                out[t] = ok & (trend > 0) & (ntrend < 0)
+                fu, fl = np.where(ok, nfu, fu), np.where(ok, nfl, fl)
+                trend = np.where(ok, ntrend, trend)
+                pc = np.where(ok, c[t], pc)
+            return pd.DataFrame(out, index=ind.index, columns=ind.close.columns)
+        return ind._memo(key, calc)
+
+    def warmup(self):
+        return 5 * self.p["n"]
+
+
+class CloseAboveUpperBand(_Panel):
+    def frame(self, ind):
+        return ind.close > ind.bbands(self.p["n"], self.p["k"])["upper"]
+
+    def warmup(self):
+        return self.p["n"] + 1
+
+
+class StochOverbought(_Panel):
+    fields = ("high", "low", "close")
+
+    def frame(self, ind):
+        k, _ = ind.stoch(self.p["k"], self.p["smooth"], self.p["d"])
+        return k > self.p["level"]
+
+    def warmup(self):
+        return self.p["k"] + self.p["smooth"] + self.p["d"]
+
+
+class BreakdownLow(_Panel):
+    def frame(self, ind):
+        return ind.close < ind.prior_lowest(self.p["n"], "close")
+
+    def warmup(self):
+        return self.p["n"] + 1
+
+
+class KeltnerBreakdown(_Panel):
+    fields = ("high", "low", "close")
+
+    def frame(self, ind):
+        return cross_below(ind.close, ind.keltner(self.p["n"], self.p["mult"])["lower"])
+
+    def warmup(self):
+        return 5 * self.p["n"]
+
+
+class PlaceboRandom(_Panel):
+    """Calibration: a sell signal on random days (independent of every price), probability `prob` per stock and
+    session, reproducible from `seed`. Any benchmark must score it at zero."""
+    def frame(self, ind):
+        rng = np.random.default_rng(int(self.p["seed"]))
+        a = rng.random(ind.close.shape) < self.p["prob"]
+        return pd.DataFrame(a, index=ind.index, columns=ind.close.columns)
+
+
+class OracleDrop(_Panel):
+    """Calibration only, reads the future on purpose: sells when the NEXT session's close is more than `drop` below
+    today's. A benchmark must detect it. Refused by every tradable strategy."""
+    def frame(self, ind):
+        nxt = ind.close.shift(-1) / ind.close - 1.0
+        return nxt < -self.p["drop"]
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -912,6 +1047,34 @@ def build_exit_registry() -> ExitRegistry:
     a(ExitDef("volatility_expansion", "indicator", "condition", "Volatility expansion",
               "realized volatility RV(short) / RV(long) reaches ratio (first session)", VolatilityExpansion,
               dict(short=I(10, 2, 100), long=I(60, 5, 252), ratio=Fl(1.5, 1.0, 5.0))))
+    a(ExitDef("death_cross", "indicator", "condition", "Death cross", "SMA(50) crosses below SMA(200)",
+              MaBearishCross, dict(fast=I(50, 2, 200), slow=I(200, 3, 400), ma=C("sma", ("sma", "ema")))))
+    a(ExitDef("close_below_sma200", "indicator", "condition", "Close below the 200-day average",
+              "close crosses below SMA(200) (mode cross) or is below it (mode below)", CloseBelowMa,
+              dict(n=I(200, 2, 400), mode=C("cross", ("cross", "below")))))
+    a(ExitDef("supertrend_exit", "indicator", "condition", "Supertrend flip",
+              "the close crosses below the Supertrend line (midpoint -/+ mult x ATR(n), ratcheted while the trend "
+              "lasts): the trend turns down", Supertrend, dict(n=I(10, 2, 100), mult=Fl(3.0, 0.5, 10.0))))
+    a(ExitDef("bb_upper_close", "indicator", "condition", "Close above the upper Bollinger band",
+              "close above SMA(n) + k sd (selling into strength)", CloseAboveUpperBand,
+              dict(n=I(20, 5, 200), k=Fl(2.0, 0.5, 4.0))))
+    a(ExitDef("stoch_overbought", "indicator", "condition", "Stochastic overbought",
+              "slow %K above level", StochOverbought,
+              dict(k=I(14, 2, 100), smooth=I(3, 1, 20), d=I(3, 1, 20), level=Fl(80.0, 50.0, 99.0))))
+    a(ExitDef("breakdown_low", "indicator", "condition", "Break below the n-session low",
+              "close below the lowest close of the n sessions before", BreakdownLow, dict(n=I(20, 2, 504))))
+    a(ExitDef("breakdown_20d_low", "indicator", "condition", "Break below the 20-day low",
+              "close below the lowest close of the 20 sessions before", BreakdownLow, dict(n=I(20, 2, 504))))
+    a(ExitDef("breakdown_52w_low", "indicator", "condition", "Break below the 52-week low",
+              "close below the lowest close of the 252 sessions before", BreakdownLow, dict(n=I(252, 2, 504))))
+    a(ExitDef("keltner_breakdown", "indicator", "condition", "Keltner channel breakdown",
+              "close crosses below EMA(n) - mult x ATR(n)", KeltnerBreakdown, dict(n=I(20, 2, 200), mult=Fl(2.0, 0.5, 6.0))))
+    a(ExitDef("placebo_random_exit", "calibration", "condition", "Placebo: random-day sell",
+              "sells on random sessions with probability prob (no price information)", PlaceboRandom,
+              dict(prob=Fl(0.03, 0.0005, 0.5), seed=I(1, 0, 2**31 - 1)), style="calibration"))
+    a(ExitDef("oracle_next_day_drop", "calibration", "condition", "Cheating rule: knows tomorrow's drop",
+              "sells when the NEXT close is more than drop below today's (reads the future: calibration only)",
+              OracleDrop, dict(drop=Fl(0.03, 0.001, 0.5)), style="calibration", lookahead=True))
     a(ExitDef("signal_exit", "indicator", "condition", "Any catalog signal",
               "a Signal Research catalog signal or combination (usually a bearish one) fires", SignalExit, {},
               doc="The component spec carries the signal spec; every bearish catalog signal is an exit signal."))
@@ -1025,13 +1188,48 @@ def build_exit_registry() -> ExitRegistry:
     return reg
 
 
+STYLE_OF = {
+    # strength: sells into a run-up or a stretched price
+    "rsi_overbought": "strength", "rsi_cross_below": "strength", "bb_upper_rejection": "strength",
+    "bb_upper_close": "strength", "stoch_overbought": "strength", "first_bearish_after_momentum": "strength",
+    "resistance_reversal": "strength",
+    # weakness: sells after a drop or a break below an average, a channel or a low
+    "macd_bearish_cross": "weakness", "ma_bearish_cross": "weakness", "death_cross": "weakness",
+    "close_below_sma": "weakness", "close_below_sma200": "weakness", "close_below_ema": "weakness",
+    "momentum_deterioration": "weakness", "rs_deterioration": "weakness", "volatility_shock": "weakness",
+    "supertrend_exit": "weakness", "breakdown_low": "weakness", "breakdown_20d_low": "weakness",
+    "breakdown_52w_low": "weakness", "keltner_breakdown": "weakness", "lower_high": "weakness",
+    "structure_break": "weakness", "consecutive_bearish": "weakness", "loss_of_momentum": "weakness",
+    "failed_breakout": "weakness", "failed_continuation": "weakness", "bearish_reversal_pattern": "neutral",
+    "volatility_expansion": "neutral", "no_new_high": "neutral",
+    "placebo_random_exit": "calibration", "oracle_next_day_drop": "calibration",
+}
+
+
+def _style(d: ExitDef) -> str:
+    if d.id in STYLE_OF:
+        return STYLE_OF[d.id]
+    if d.kind == "target":
+        return "target"
+    if d.family in ("stop", "trailing"):
+        return "protective"
+    if d.family == "time":
+        return "time"
+    return "neutral"
+
+
 _registry: ExitRegistry | None = None
 
 
 def default_exit_registry() -> ExitRegistry:
     global _registry
     if _registry is None:
-        _registry = build_exit_registry()
+        reg = build_exit_registry()
+        styled = ExitRegistry()
+        for d in reg.all():
+            styled.register(d if d.style != "neutral" or _style(d) == "neutral" else
+                            ExitDef(**{**d.__dict__, "style": _style(d)}))
+        _registry = styled
     return _registry
 
 
