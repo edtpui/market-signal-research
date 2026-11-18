@@ -1,5 +1,5 @@
 """A mirror of the parts of ptrade's basket contract the Strategy Lab plug-in targets, so the plug-in is built and
-tested here without importing operational code. Source: QwenWorkspace/paper_trading at commit 792758b (read-only),
+tested here without importing operational code. Source: Ops/paper_trading at commit 792758b (read-only),
 ptrade/book_registry.py (Frames, BookRun.check, SCORE_COLUMNS, TRADE_KINDS, check_scores) and baskets/run.py
 (run_book: the nightly full re-run, restatement compare, store_candidates' features_sha256).
 scripts/check_ptrade_contract.py re-hashes those files read-only and reports drift; any drift means this mirror

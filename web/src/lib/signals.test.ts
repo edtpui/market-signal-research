@@ -4,16 +4,16 @@ import { fmtValue, ticks } from "@/components/ResearchCharts";
 import { match } from "@/lib/router";
 
 describe("signal research routes", () => {
-  it("maps every Signal Research page", () => {
-    expect(match("/signals")).toEqual({ page: "signals", view: "library" });
+  it("maps every signal-study page, and the old list paths onto their new places", () => {
     expect(match("/signals/new")).toEqual({ page: "signals", view: "new" });
-    expect(match("/signals/rankings")).toEqual({ page: "signals", view: "rankings" });
-    expect(match("/signals/history")).toEqual({ page: "signals", view: "history" });
-    expect(match("/signals/library/rsi14_below_30")).toEqual({ page: "signals", view: "signal", id: "rsi14_below_30" });
     expect(match("/signals/experiments/sr-1")).toEqual({ page: "signals", view: "experiment", id: "sr-1" });
     expect(match(`/signals/experiments/sr-1/${encodeURIComponent("rsi14_below_30@1.0:b34a2ff8")}`))
       .toEqual({ page: "signals", view: "result", id: "sr-1", key: "rsi14_below_30@1.0:b34a2ff8" });
-    expect(match("/strategies/x")).toEqual({ page: "strategies", id: "x" });
+    expect(match("/signals")).toEqual({ page: "library", tab: "signals" });
+    expect(match("/signals/rankings")).toEqual({ page: "results", view: "signal-rankings" });
+    expect(match("/signals/history")).toEqual({ page: "experiments", kind: "signal" });
+    expect(match("/signals/library/rsi14_below_30")).toEqual({ page: "library", tab: "signals", id: "rsi14_below_30" });
+    expect(match("/strategies/x")).toEqual({ page: "library", tab: "strategies", id: "x" });
   });
 });
 

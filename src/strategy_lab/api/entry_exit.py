@@ -196,10 +196,6 @@ def build_router(lab) -> APIRouter:
     def timing(eid: str):
         return R.read_json(eid, "timing.json") or {}
 
-    @r.get("/experiments/{eid}/tests")
-    def tests(eid: str):
-        return R.read_json(eid, "tests.json") or {}
-
     @r.get("/leaderboards")
     def leaderboards(board: str = "pairs", objective: str = "oos_excess", role: str = "validation",
                      experiment_id: str | None = None, min_trades: int = Query(30, ge=1),

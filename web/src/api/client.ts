@@ -224,7 +224,12 @@ export interface Settings {
   universes: string[];
   execution_defaults: ExecutionConfig;
   paths: Record<string, string>;
+  research: {
+    signal: { workers: number; reference: Record<"sector" | "market_cap", { available: boolean; source: string | null; note: string }> };
+    entry_exit: { workers: number };
+  };
   forward: { host: string; mock_dataset: string; ptrade_api_url: string | null };
+  ptrade: { contract_commit: string; universe_file: string | null };
   research_periods: { name: string; start: string; end: string }[];
 }
 
@@ -391,10 +396,4 @@ export interface Reconciliation {
   trades_identical: boolean;
   identical: boolean;
   dataset: string;
-}
-
-export interface Validation {
-  ok: boolean;
-  problems: string[];
-  warnings: string[];
 }

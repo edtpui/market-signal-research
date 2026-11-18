@@ -29,6 +29,7 @@ from strategy_lab.engine.config import ExecutionConfig
 from strategy_lab.engine.runner import StrategyError
 from strategy_lab.experiments.config import ExperimentConfig
 from strategy_lab.lab import Lab
+from strategy_lab.paper import contract as ptrade_contract
 from strategy_lab.paper.client import PtradeApiError
 from strategy_lab.paper.mock_host import HostError
 from strategy_lab.paper.service import DeployError
@@ -132,7 +133,7 @@ def create_app(lab: Lab | None = None) -> FastAPI:
         return dict(ok=True, version=strategy_lab.__version__, now_utc=dt.datetime.now(dt.timezone.utc).isoformat(),
                     policy=lab.policy.to_dict(), strategies=len(lab.registry.all()),
                     signals=len(lab.signals.all()), signal_families=len(lab.signals.families),
-                    strategy_errors=lab.registry.errors, workspace="ClaudeWorkspace (dev, EXPLORATORY)",
+                    strategy_errors=lab.registry.errors, workspace="Lab (dev, EXPLORATORY)",
                     forward=dict(mock_dataset=lab.forward.mock_dataset, ptrade_api_enabled=bool(lab.forward.ptrade_url)))
 
     @api.get("/settings")
@@ -144,9 +145,18 @@ def create_app(lab: Lab | None = None) -> FastAPI:
                     universes=lab.universes.names(), execution_defaults=ExecutionConfig().model_dump(),
                     execution_schema=ExecutionConfig.model_json_schema(),
                     paths=dict(cache=str(s.cache_dir), experiments=str(s.experiments_dir), catalog=str(s.catalog_path),
-                               forward=str(s.forward_dir), user_strategies=str(s.user_strategies_dir)),
+                               forward=str(s.forward_dir), user_strategies=str(s.user_strategies_dir),
+                               signal_research=str(s.signal_research_dir), signal_imports=str(s.signal_imports_dir),
+                               entry_exit=str(s.entry_exit_dir), entry_exit_imports=str(s.entry_exit_imports_dir)),
+                    # the same section keys and defaults Lab reads ([signal_research] and [entry_exit] workers)
+                    research=dict(signal=dict(workers=int(s.section("signal_research").get("workers", 1)),
+                                              reference=lab.reference.availability()),
+                                  entry_exit=dict(workers=int(s.section("entry_exit").get("workers", 1)))),
                     forward=dict(host="mock", mock_dataset=lab.forward.mock_dataset,
                                  ptrade_api_url=lab.forward.ptrade_url or None),
+                    ptrade=dict(contract_commit=ptrade_contract.SOURCE_COMMIT,
+                                universe_file=str(lab.forward.ptrade_universe_file)
+                                if lab.forward.ptrade_universe_file else None),
                     research_periods=[dict(name=n, start=a.isoformat(), end=b.isoformat()) for n, a, b in PERIODS])
 
     # -- strategies -----------------------------------------------------------------------------------------------
@@ -385,10 +395,6 @@ def create_app(lab: Lab | None = None) -> FastAPI:
     def advance(body: AdvanceRequest):
         return lab.forward.advance(to=body.to, sessions=body.sessions)
 
-    @api.post("/forward/validate")
-    def validate_deploy(spec: DeploymentSpec):
-        return lab.forward.validate(spec)
-
     @api.get("/forward/deployments")
     def deployments():
         out = []
@@ -484,10 +490,13 @@ def create_app(lab: Lab | None = None) -> FastAPI:
         if not WEB_DIST.exists():
             return Response("Market Signal Research API is running; the web UI is not built (web/dist). See README.md.",
                             media_type="text/plain")
+        # index.html must be revalidated, or browsers keep a stale shell (and its old bundle) after a rebuild; the
+        # files under assets/ carry a content hash in their name, so they never change and can be cached for good.
         f = (WEB_DIST / path).resolve()
         if path and f.is_file() and WEB_DIST.resolve() in f.parents:
-            return FileResponse(f)
-        return FileResponse(WEB_DIST / "index.html")
+            immutable = path.startswith("assets/")
+            return FileResponse(f, headers={"Cache-Control": "public, max-age=31536000, immutable" if immutable else "no-cache"})
+        return FileResponse(WEB_DIST / "index.html", headers={"Cache-Control": "no-cache"})
 
     return app
 

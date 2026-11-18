@@ -1,5 +1,5 @@
 """MockPtradeHost: a SIMULATED stand-in for ptrade's basket host, for developing and testing the forward workflow in
-ClaudeWorkspace on <= 2025 data. It is a test double of the contract, not a second engine: trades are decided by
+Lab on <= 2025 data. It is a test double of the contract, not a second engine: trades are decided by
 the exported plug-in's rule (Strategy Lab's engine) exactly as in ptrade. What it mirrors from paper_trading 792758b:
 
   * plug-in loading: the bundle's baskets/plugins/<module>.py is executed from its file and its RULE / PRODUCER

@@ -7,7 +7,7 @@ tables, tagged with the deployment (and so with the originating strategy, versio
 Hosts:
   mock    MockPtradeHost in var/forward (SIMULATED, <= 2025 data, driven by advance()).
   ptrade  the operational paper_trading: export only (a human applies the bundle) plus API v1 reads. Disabled in
-          ClaudeWorkspace: [forward] ptrade_api_url must stay empty here, because API v1 serves HOLDOUT/FWD evidence.
+          Lab: [forward] ptrade_api_url must stay empty here, because API v1 serves HOLDOUT/FWD evidence.
 """
 from __future__ import annotations
 

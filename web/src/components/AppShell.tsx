@@ -1,34 +1,26 @@
-// The frame (the ptrade terminal's header): brand, page tabs, the data policy, the paper host's clock, API status and
-// the theme toggle.
+// The frame (the ptrade terminal's header): brand, the six sections, the data policy, API status and the theme toggle;
+// below it, the active section's tabs (lib/nav.ts).
 import { FlaskConical, Moon, Sun } from "lucide-react";
-import type { ReactNode } from "react";
+import { Fragment, useEffect, type ReactNode } from "react";
 
-import { useHealth, useHost } from "@/api/hooks";
+import { useHealth } from "@/api/hooks";
 import { useTheme } from "@/components/theme";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Link, useLocation } from "@/lib/router";
+import { pageTitle, SECTIONS, SECTION_TABS, sectionOf } from "@/lib/nav";
+import { Link, match, useLocation } from "@/lib/router";
 import { cn } from "@/lib/utils";
-
-export const NAV = [
-  { to: "/", label: "Overview", match: (p: string) => p === "/" },
-  { to: "/strategies", label: "Strategy Library", match: (p: string) => p.startsWith("/strategies") },
-  { to: "/signals", label: "Signal Research", match: (p: string) => p.startsWith("/signals") },
-  { to: "/entry-exit", label: "Entry-Exit Lab", match: (p: string) => p.startsWith("/entry-exit") },
-  { to: "/backtest", label: "Backtesting", match: (p: string) => p.startsWith("/backtest") || p.startsWith("/runs/") },
-  { to: "/forward", label: "Forward Testing", match: (p: string) => p.startsWith("/forward") },
-  { to: "/analytics", label: "Performance Analytics", match: (p: string) => p.startsWith("/analytics") },
-  { to: "/data", label: "Market Data", match: (p: string) => p.startsWith("/data") },
-  { to: "/experiments", label: "Experiment History", match: (p: string) => p.startsWith("/experiments") },
-  { to: "/settings", label: "Settings", match: (p: string) => p.startsWith("/settings") },
-];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { path } = useLocation();
+  const route = match(path);
+  const section = sectionOf(route);
+  const tabs = section ? SECTION_TABS[section] : undefined;
   const health = useHealth();
-  const host = useHost();
   const { theme, setTheme } = useTheme();
   const ceiling = health.data?.policy.ceiling;
+  const title = pageTitle(route);
+  useEffect(() => { document.title = title; }, [title]);
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-30 border-b bg-background/95 backdrop-blur">
@@ -38,10 +30,10 @@ export function AppShell({ children }: { children: ReactNode }) {
             Market Signal<span className="font-normal text-muted-foreground">Research</span>
           </Link>
           <nav className="flex min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {NAV.map((n) => (
-              <Link key={n.to} to={n.to} data-nav={n.label}
+            {SECTIONS.map((n) => (
+              <Link key={n.to} to={n.to} data-nav={n.label} aria-current={n.section === section ? "page" : undefined}
                 className={cn("rounded-md px-2.5 py-1 text-xs font-medium whitespace-nowrap text-muted-foreground hover:bg-accent hover:text-foreground",
-                  n.match(path) && "bg-accent text-foreground")}>
+                  n.section === section && "bg-accent text-foreground")}>
                 {n.label}
               </Link>
             ))}
@@ -53,10 +45,6 @@ export function AppShell({ children }: { children: ReactNode }) {
                 DEV · data ≤ {ceiling}
               </Badge>
             )}
-            <span className="hidden items-center gap-1.5 text-muted-foreground lg:flex" title="The paper host's clock: the last session it completed">
-              Paper host
-              <span className="num text-foreground">{host.data ? `${host.data.label} · ${host.data.clock ?? "not started"}` : "—"}</span>
-            </span>
             <span className="flex items-center gap-1.5" data-api={health.isError ? "down" : "up"}>
               <span className={cn("size-2 rounded-full", health.isError ? "bg-neg" : health.data ? "bg-pos" : "bg-muted-foreground")} />
               <span className="text-muted-foreground">{health.isError ? "API down" : `API ${health.data?.version ?? ""}`}</span>
@@ -66,6 +54,27 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Button>
           </div>
         </div>
+        {tabs && (
+          <div className="border-t">
+            <nav className="mx-auto flex h-9 max-w-[1680px] items-center gap-0.5 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-subnav={section}>
+              {tabs.map((group, gi) => (
+                <Fragment key={gi}>
+                  {gi > 0 && <span className="mx-1.5 h-4 w-px shrink-0 bg-border" aria-hidden />}
+                  {group.map((t) => {
+                    const on = t.active(route);
+                    return (
+                      <Link key={t.to} to={t.to} data-tab={t.label} aria-current={on ? "page" : undefined}
+                        className={cn("rounded-md px-2.5 py-1 text-xs font-medium whitespace-nowrap text-muted-foreground hover:text-foreground",
+                          on && "bg-muted text-foreground")}>
+                        {t.label}
+                      </Link>
+                    );
+                  })}
+                </Fragment>
+              ))}
+            </nav>
+          </div>
+        )}
       </header>
       <main className="mx-auto w-full max-w-[1680px] flex-1 px-4 py-3">{children}</main>
     </div>

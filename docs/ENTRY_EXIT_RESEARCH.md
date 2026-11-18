@@ -81,7 +81,8 @@ src/strategy_lab/entryexit/
   imports.py      a cell -> a generated Strategy Library module (record with results and provenance)
 src/strategy_lab/strategies/entry_exit.py the Strategy that runs a pairing in the event-driven engine
 src/strategy_lab/api/entry_exit.py        /api/v1/entry-exit/*
-web/src/pages/entryexit/*                 Exit Library, Experiment Builder, matrix, cell detail, leaderboards
+web/src/pages/entryexit/*                 Experiments > Exits, New entry-exit study, matrix, cell detail,
+                                          Results > Entry-exit leaderboards
 scripts/ee_reference_experiment.py        the reference experiments of this report
 ```
 
@@ -164,7 +165,7 @@ unchanged).
   `oracle_next_day_drop` (reads tomorrow's close; exempt from the look-ahead test by declaration, refused by
   strategies, deployment and import). They exist to check the random-timing benchmark (section 1.3).
 
-Every exit also has a **style** (`GET /catalog`, Exit Library column): strength (sells after a rise), weakness
+Every exit also has a **style** (`GET /catalog`, a column of Experiments > Exits): strength (sells after a rise), weakness
 (sells after a fall or a trend break), neutral, time, protective, target, calibration.
 
 ## 4. Trigger semantics (deterministic, identical in both layers)
@@ -260,7 +261,7 @@ statistical confidence, CAGR or mean trade, separately for train and validation 
 with the record: entry and exit definitions, parameters, sizing, costs, the cell's trade-level and portfolio results
 per partition, random-entry and baseline comparisons, walk-forward rows, the source experiment (dataset version,
 universe, window, config and methodology hashes, seed), the validation partitions and a warning. The strategy loads
-like `strategies_user/` (category `entry_exit`), backtests in the existing engine (Backtesting) and deploys through
+like `strategies_user/` (category `entry_exit`), backtests in the existing engine (New backtest) and deploys through
 the existing forward adapter; its export pins `strategies/entry_exit.py`, `entryexit/` and `signals/`.
 
 `ForwardService.validate` refuses any `requires_historical_test` strategy without a finished backtest of the same
@@ -289,10 +290,10 @@ strategy version (and warns when the backtests used other parameters or universe
   daily sessions; weekly or monthly bars are not offered for entry-exit experiments.
 - **Participation caps** (partial fills on bar volume) act in the portfolio layer only; the replay's unit positions
   always fill.
-- **Multi-process**: an entry-exit experiment records its owner process (`owner.json`); the API server's startup
-  recovery marks it interrupted only when that process is gone (fixed 2026-11-04 after a server start mislabelled a
-  running script's experiment). The backtest and Signal Research stores still mark every queued/running row
-  interrupted at startup: do not start the server while one of their scripts runs.
+- **Multi-process**: an experiment records its owner process (`owner.json`); the API server's startup recovery
+  marks it interrupted only when that process is gone (fixed 2026-11-04 for entry-exit studies after a server start
+  mislabelled a running script's experiment; since 2026-11-06 the backtest and signal stores share the same
+  recovery, `strategy_lab/catalog.py`). Directories made before owner files existed count as unowned.
 - **R-multiples against the plan's own stop** become very large when the initial stop sits just below the entry (e.g.
   a 20-EMA trail on a breakout); compare exits with the reference-R expectancy or with returns.
 - **Cost**: replay time grows with events × controls × holding length; portfolio runs (one per cell, partition and

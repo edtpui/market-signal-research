@@ -24,7 +24,6 @@ in its JSON state and the replay can hold a million trades in the same layout.
 """
 from __future__ import annotations
 
-import hashlib
 import re
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal, Union
@@ -458,10 +457,6 @@ class PlanRuntime:
             c = self.plan.components[code]
             return f"{c['kind']}:{c['id']}"
         return SPECIAL_REASONS.get(int(code), str(code))
-
-
-def plan_hash(plan: ResolvedPlan) -> str:
-    return hashlib.sha256(plan.key.encode()).hexdigest()[:10]
 
 
 __all__ = ["ExitComponentSpec", "ExitPlanSpec", "ResolvedPlan", "resolve_plan", "PlanRuntime", "Decision", "single",

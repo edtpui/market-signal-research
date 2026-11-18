@@ -1,0 +1,31 @@
+# Market Signal Research in its own container:  docker compose up -d   ->  http://127.0.0.1:8070
+#
+# The image holds only the interpreter and dependencies (docker/Dockerfile). The project and the research data are
+# mounted read-only at the same relative layout as on the host, so config/settings.toml is used unchanged. Code or
+# web/dist changes on the host take effect with `docker compose restart`.
+#
+# State (var/: catalog.db with the append-only ledgers, experiments, dataset cache, forward mock host) lives in the
+# named volume `market-signal-research-var`, seeded once from the host's var/ on 2026-11-16. The host var/ is no
+# longer written to; do not run the host server (scripts/sl.sh serve) for new work, its state would diverge.
+name: market-signal-research
+
+services:
+  app:
+    image: market-signal-research:0.1.0
+    build: ./docker
+    container_name: market-signal-research
+    # platform.node() is written into every experiment's owner.json and compared by startup recovery: keep it fixed.
+    hostname: market-signal-research
+    init: true
+    restart: unless-stopped
+    ports:
+      - "8070:8070"   # all host interfaces (user request 2026-11-16); the API has no authentication: LAN-trusted only
+    volumes:
+      - .:/workspace/strategy_lab:ro
+      - ../data:/workspace/data:ro
+      - var:/workspace/strategy_lab/var
+    stop_grace_period: 30s
+
+volumes:
+  var:
+    name: market-signal-research-var

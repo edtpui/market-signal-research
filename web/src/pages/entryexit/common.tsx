@@ -1,33 +1,7 @@
-// Shared pieces of the Entry-Exit Lab pages: sub-navigation, metric formatting and the matrix colour scale.
-import type { ReactNode } from "react";
-
+// Shared pieces of the entry-exit pages: metric formatting, progress and failure text, and the matrix colour scale.
 import { LOWER_IS_BETTER, PCT_METRICS, SIGNED_METRICS, type ExperimentRow } from "@/api/entryExit";
 import * as fmt from "@/lib/format";
-import { Link, useLocation } from "@/lib/router";
 import { cn } from "@/lib/utils";
-
-const TABS = [
-  { to: "/entry-exit", label: "Exit Library", match: (p: string) => p === "/entry-exit" },
-  { to: "/entry-exit/new", label: "Experiment Builder", match: (p: string) => p.startsWith("/entry-exit/new") },
-  { to: "/entry-exit/leaderboards", label: "Leaderboards", match: (p: string) => p.startsWith("/entry-exit/leaderboards") },
-  { to: "/entry-exit/history", label: "Experiments", match: (p: string) => p.startsWith("/entry-exit/history") || p.startsWith("/entry-exit/experiments") },
-];
-
-export function EESubNav({ right }: { right?: ReactNode }) {
-  const { path } = useLocation();
-  return (
-    <div className="mb-3 flex flex-wrap items-center gap-2 border-b pb-2" data-subnav="entry-exit">
-      <div className="inline-flex h-8 items-center rounded-lg bg-muted p-[3px] text-muted-foreground">
-        {TABS.map((t) => (
-          <Link key={t.to} to={t.to} className={cn("rounded-md px-2.5 py-1 text-xs font-medium whitespace-nowrap hover:text-foreground",
-            t.match(path) && "bg-background text-foreground shadow-sm dark:bg-input/30")}>{t.label}</Link>
-        ))}
-      </div>
-      <span className="text-2xs text-muted-foreground">Entry signals x exit plans on identical events, against random entries under the same exit · EXPLORATORY, data ≤ 2025-12-31</span>
-      {right && <div className="ml-auto flex items-center gap-2">{right}</div>}
-    </div>
-  );
-}
 
 export function fmtMetric(metric: string, v: number | null | undefined): string {
   if (!fmt.finite(v)) return fmt.DASH;
@@ -74,7 +48,7 @@ export function eeFailure(m: ExperimentRow): { title: string; message: string; p
   const err = m.error ?? "unknown error";
   if (/^interrupted/.test(err)) {
     return { title: "The experiment was interrupted", message: "The process running it stopped before it finished (for example the app or the computer was restarted).",
-      problems: [], hint: "Launch it again from the Experiment Builder; this record is kept and shows what had finished." };
+      problems: [], hint: "Launch it again from New entry-exit study; this record is kept and shows what had finished." };
   }
   const where = STAGE[m.stage ?? ""]?.toLowerCase() ?? "running";
   const clean = err.replace(/^[A-Za-z]+(Error|Exception): /, "");

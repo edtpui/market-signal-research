@@ -27,55 +27,74 @@ export function useLocation(): { path: string; search: URLSearchParams } {
   return { path, search: new URLSearchParams(q) };
 }
 
+export type ExperimentKind = "all" | "backtest" | "signal" | "entry-exit";
+export type LibraryTab = "strategies" | "signals" | "exits";
+export type ResultsView = "compare" | "signal-rankings" | "leaderboards" | "ledgers";
+export type SignalView = "new" | "experiment" | "result";
+export type EEView = "new" | "experiment" | "cell";
+
 export type Route =
   | { page: "overview" }
-  | { page: "strategies"; id?: string }
+  | { page: "experiments"; kind?: ExperimentKind }
+  | { page: "backtest" }
   | { page: "signals"; view: SignalView; id?: string; key?: string }
   | { page: "entryexit"; view: EEView; id?: string; cell?: string }
-  | { page: "backtest" }
+  | { page: "library"; tab: LibraryTab; id?: string }
+  | { page: "results"; view: ResultsView }
   | { page: "run"; id: string }
   | { page: "forward"; id?: string }
-  | { page: "analytics" }
   | { page: "data"; id?: string }
-  | { page: "experiments" }
   | { page: "settings" }
   | { page: "missing"; path: string };
 
-export type SignalView = "library" | "signal" | "new" | "rankings" | "history" | "experiment" | "result";
-export type EEView = "library" | "new" | "leaderboards" | "history" | "experiment" | "cell";
+const dec = (s: string | undefined) => (s ? decodeURIComponent(s) : undefined);
+
+// Paths that older links, bookmarks and generated records use, mapped onto the current pages.
+const ALIASES: Record<string, Route> = {
+  "/signals": { page: "library", tab: "signals" },
+  "/entry-exit": { page: "library", tab: "exits" },
+  "/signals/history": { page: "experiments", kind: "signal" },
+  "/entry-exit/history": { page: "experiments", kind: "entry-exit" },
+  "/analytics": { page: "results", view: "compare" },
+  "/signals/rankings": { page: "results", view: "signal-rankings" },
+  "/entry-exit/leaderboards": { page: "results", view: "leaderboards" },
+};
+
+const RESULTS_VIEWS: readonly ResultsView[] = ["compare", "signal-rankings", "leaderboards", "ledgers"];
 
 export function match(path: string): Route {
   const p = path.replace(/\/+$/, "") || "/";
   if (p === "/") return { page: "overview" };
-  if (p === "/signals") return { page: "signals", view: "library" };
-  if (p === "/signals/new") return { page: "signals", view: "new" };
-  if (p === "/signals/rankings") return { page: "signals", view: "rankings" };
-  if (p === "/signals/history") return { page: "signals", view: "history" };
-  let sm = /^\/signals\/library\/([^/]+)$/.exec(p);
-  if (sm) return { page: "signals", view: "signal", id: decodeURIComponent(sm[1]) };
-  sm = /^\/signals\/experiments\/([^/]+)\/([^/]+)$/.exec(p);
-  if (sm) return { page: "signals", view: "result", id: decodeURIComponent(sm[1]), key: decodeURIComponent(sm[2]) };
-  sm = /^\/signals\/experiments\/([^/]+)$/.exec(p);
-  if (sm) return { page: "signals", view: "experiment", id: decodeURIComponent(sm[1]) };
-  if (p === "/entry-exit") return { page: "entryexit", view: "library" };
-  if (p === "/entry-exit/new") return { page: "entryexit", view: "new" };
-  if (p === "/entry-exit/leaderboards") return { page: "entryexit", view: "leaderboards" };
-  if (p === "/entry-exit/history") return { page: "entryexit", view: "history" };
-  sm = /^\/entry-exit\/experiments\/([^/]+)\/cells\/([^/]+)$/.exec(p);
-  if (sm) return { page: "entryexit", view: "cell", id: decodeURIComponent(sm[1]), cell: decodeURIComponent(sm[2]) };
-  sm = /^\/entry-exit\/experiments\/([^/]+)$/.exec(p);
-  if (sm) return { page: "entryexit", view: "experiment", id: decodeURIComponent(sm[1]) };
-  let m = /^\/strategies(?:\/([^/]+))?$/.exec(p);
-  if (m) return { page: "strategies", id: m[1] ? decodeURIComponent(m[1]) : undefined };
-  if (p === "/backtest") return { page: "backtest" };
-  m = /^\/runs\/([^/]+)$/.exec(p);
-  if (m) return { page: "run", id: decodeURIComponent(m[1]) };
-  m = /^\/forward(?:\/([^/]+))?$/.exec(p);
-  if (m) return { page: "forward", id: m[1] ? decodeURIComponent(m[1]) : undefined };
-  if (p === "/analytics") return { page: "analytics" };
-  m = /^\/data(?:\/([^/]+))?$/.exec(p);
-  if (m) return { page: "data", id: m[1] ? decodeURIComponent(m[1]) : undefined };
+  if (ALIASES[p]) return ALIASES[p];
   if (p === "/experiments") return { page: "experiments" };
+  if (p === "/backtest") return { page: "backtest" };
+  if (p === "/signals/new") return { page: "signals", view: "new" };
+  if (p === "/entry-exit/new") return { page: "entryexit", view: "new" };
+  let m = /^\/signals\/experiments\/([^/]+)\/([^/]+)$/.exec(p);
+  if (m) return { page: "signals", view: "result", id: dec(m[1]), key: dec(m[2]) };
+  m = /^\/signals\/experiments\/([^/]+)$/.exec(p);
+  if (m) return { page: "signals", view: "experiment", id: dec(m[1]) };
+  m = /^\/entry-exit\/experiments\/([^/]+)\/cells\/([^/]+)$/.exec(p);
+  if (m) return { page: "entryexit", view: "cell", id: dec(m[1]), cell: dec(m[2]) };
+  m = /^\/entry-exit\/experiments\/([^/]+)$/.exec(p);
+  if (m) return { page: "entryexit", view: "experiment", id: dec(m[1]) };
+  if (p === "/library") return { page: "library", tab: "strategies" };
+  m = /^\/library\/(strategies|signals)(?:\/([^/]+))?$/.exec(p);
+  if (m) return { page: "library", tab: m[1] as LibraryTab, id: dec(m[2]) };
+  if (p === "/library/exits") return { page: "library", tab: "exits" };
+  m = /^\/strategies(?:\/([^/]+))?$/.exec(p);
+  if (m) return { page: "library", tab: "strategies", id: dec(m[1]) };
+  m = /^\/signals\/library\/([^/]+)$/.exec(p);
+  if (m) return { page: "library", tab: "signals", id: dec(m[1]) };
+  if (p === "/results") return { page: "results", view: "compare" };
+  m = /^\/results\/([^/]+)$/.exec(p);
+  if (m && (RESULTS_VIEWS as readonly string[]).includes(m[1])) return { page: "results", view: m[1] as ResultsView };
+  m = /^\/runs\/([^/]+)$/.exec(p);
+  if (m) return { page: "run", id: dec(m[1])! };
+  m = /^\/forward(?:\/([^/]+))?$/.exec(p);
+  if (m) return { page: "forward", id: dec(m[1]) };
+  m = /^\/data(?:\/([^/]+))?$/.exec(p);
+  if (m) return { page: "data", id: dec(m[1]) };
   if (p === "/settings") return { page: "settings" };
   return { page: "missing", path };
 }

@@ -15,11 +15,6 @@ import {
 
 import { cn } from "@/lib/utils";
 
-// -- card -----------------------------------------------------------------------------------------------------------
-export function Card({ className, ...props }: React.ComponentProps<"div">) {
-  return <div data-slot="card" className={cn("flex flex-col gap-6 rounded-xl border bg-card py-6 text-card-foreground shadow-sm", className)} {...props} />;
-}
-
 // -- inputs ---------------------------------------------------------------------------------------------------------
 export function Input({ className, type, ...props }: React.ComponentProps<"input">) {
   return (
@@ -147,7 +142,6 @@ export function TooltipContent({ className, sideOffset = 0, children, ...props }
 
 // -- dialog ---------------------------------------------------------------------------------------------------------
 export const Dialog = DialogPrimitive.Root;
-export const DialogTrigger = DialogPrimitive.Trigger;
 export function DialogContent({ className, children, ...props }: React.ComponentProps<typeof DialogPrimitive.Content>) {
   return (
     <DialogPrimitive.Portal>

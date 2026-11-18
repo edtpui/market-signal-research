@@ -1,7 +1,7 @@
 """Reference data for matching and benchmarks: sectors and (optionally) market capitalization.
 
 Sectors come from SEC SIC codes (settings [signal_research] sector_file, a CSV with ticker and sic columns, e.g.
-ClaudeWorkspace/data/sec_edgar/companies.csv). SIC is not GICS: the mapping below is an approximation at the level
+Lab/data/sec_edgar/companies.csv). SIC is not GICS: the mapping below is an approximation at the level
 of SIC major groups and is CURRENT, not point-in-time (a company's SIC code today is applied to every date). Every
 result that uses sectors says so.
 

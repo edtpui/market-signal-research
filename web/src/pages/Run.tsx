@@ -190,9 +190,9 @@ export function RunPage({ id }: { id: string }) {
         sub={<span className="num">{r.strategy}@{r.strategy_version} · {r.dataset}@{fmt.bytesHash(r.dataset_version, 8)} · {r.start} → {r.end} · {r.frequency} · {fmt.usd(cfg.initial_capital)} · run {r.run_id}</span>}
         actions={<>
           <Button size="sm" variant="outline" onClick={() => navigate(`/backtest?from=${r.run_id}`)}><Copy className="size-3.5" />Clone config</Button>
-          <Button size="sm" variant="outline" disabled={!done} onClick={() => navigate(`/analytics?ids=${r.run_id}`)}><GitCompare className="size-3.5" />Compare</Button>
+          <Button size="sm" variant="outline" disabled={!done} onClick={() => navigate(`/results/compare?ids=${r.run_id}`)}><GitCompare className="size-3.5" />Compare</Button>
           <Button size="sm" variant="outline" disabled={!done || reproduce.isPending} data-action="reproduce"
-            onClick={() => reproduce.mutate(r.run_id, { onSuccess: () => toast.success("Reproduction queued: it appears in Experiment History"), onError: (e) => toast.error(e.message) })}>
+            onClick={() => reproduce.mutate(r.run_id, { onSuccess: () => toast.success("Reproduction queued: it appears in Experiments"), onError: (e) => toast.error(e.message) })}>
             <Repeat className="size-3.5" />Reproduce
           </Button>
           <Button size="sm" disabled={!done} onClick={() => setDeployOpen(true)} data-action="open-deploy"><Rocket className="size-3.5" />Deploy forward</Button>
@@ -205,7 +205,7 @@ export function RunPage({ id }: { id: string }) {
         </div>
       )}
       {(r.status === "queued" || r.status === "running") && <ProgressBar value={null} label={r.status === "queued" ? "Queued" : "Backtest running"} detail="the engine reports no session count; this page refreshes when it finishes" startedAt={r.started_at_utc} />}
-      {r.status === "failed" && <ErrorState error={`${r.error}${d.error ? `\n\n${d.error.slice(-1500)}` : ""}`} />}
+      {r.status === "failed" && <ErrorState title="This run failed" error={`${r.error}${d.error ? `\n\n${d.error.slice(-4000)}` : ""}`} />}
       {done && (
         <>
           <MetricGrid metrics={d.metrics} keys={HEADLINE} />

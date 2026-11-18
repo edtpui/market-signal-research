@@ -1,26 +1,28 @@
-// Entry-Exit Experiment Builder: entries (catalog signals, families, combinations with AND / OR / k-of-n / weighted
+// New entry-exit study: entries (catalog signals, families, combinations with AND / OR / k-of-n / weighted
 // logic, parameter grids), exits (catalog exits, families, composed plans with condition logic and partial targets,
 // parameter sweeps, protective stops shared by every plan, the baseline exit), the data window and universe, holding
 // and risk settings, random-entry controls, the event-driven portfolio settings, costs and the chronological
 // validation design. Validate shows the cell count and the multiple-testing load before anything runs.
-import { CheckCircle2, Play, Plus, Save, Trash2 } from "lucide-react";
+import { CheckCircle2, Play, Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { describeError } from "@/api/client";
 import {
-  useEECatalog, useEEConfigs, useEELaunch, useEEOptions, useEESaveConfig, useEEValidate,
+  useEECatalog, useEEConfigs, useEEDeleteConfig, useEELaunch, useEEOptions, useEESaveConfig, useEEValidate,
   type EEConfig, type ExitComponentSpec, type ExitPlanSpec, type ValidateResult,
 } from "@/api/entryExit";
-import { useDatasets, useUniverses } from "@/api/hooks";
+import { useDatasets } from "@/api/hooks";
 import type { AnySpec, CombinationSpec } from "@/api/signals";
 import { ChoiceSelect, ExecutionEditor, Field, NumberInput, ParamsEditor } from "@/components/ConfigForm";
 import { KV, Loading, PageHeader, Panel, PeriodBadge } from "@/components/common";
+import { DataWindowFields } from "@/components/DataWindow";
 import { ProblemPanel } from "@/components/Progress";
+import { SavedConfigsPanel } from "@/components/SavedConfigs";
 import { Button } from "@/components/ui/button";
 import { Input, Switch } from "@/components/ui/primitives";
+import { applyUniverse, universeChoiceOf, type UniverseChoice } from "@/lib/dataWindow";
 import { navigate, useLocation } from "@/lib/router";
-import { EESubNav } from "@/pages/entryexit/common";
 
 const csvVals = (s: string): unknown[] => s.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean).map((x) => (Number.isFinite(Number(x)) ? Number(x) : x));
 const emptyPlan = (): ExitPlanSpec => ({ components: [], condition_mode: "or", min_bars: 0, name: "" });
@@ -92,12 +94,12 @@ export function Builder() {
   const validate = useEEValidate();
   const launch = useEELaunch();
   const save = useEESaveConfig();
+  const del = useEEDeleteConfig();
   const { search } = useLocation();
   const [cfg, setCfg] = useState<EEConfig | null>(null);
   const [problem, setProblem] = useState<ReturnType<typeof describeError> | null>(null);
   const [check, setCheck] = useState<ValidateResult | null>(null);
-  const [universeMode, setUniverseMode] = useState<"named" | "custom">("named");
-  const [symbols, setSymbols] = useState("");
+  const [universe, setUniverse] = useState<UniverseChoice>({ mode: "named", symbols: "" });
   const [addEntry, setAddEntry] = useState("");
   const [addFamily, setAddFamily] = useState("");
   const [addExit, setAddExit] = useState("");
@@ -106,15 +108,13 @@ export function Builder() {
   const [grid, setGrid] = useState<{ component: number; param: string; values: string }>({ component: 0, param: "", values: "" });
   const [eGrid, setEGrid] = useState<{ id: string; param: string; values: string }>({ id: "", param: "", values: "" });
   const [protective, setProtective] = useState("");
-  const [saveName, setSaveName] = useState("");
-  const universes = useUniverses(cfg?.dataset);
 
   useEffect(() => {
     if (cfg || !opts.data || !datasets.data) return;
     const saved = search.get("config");
     if (saved && configs.data) {
       const c = configs.data.find((x) => x.config_id === saved);
-      if (c) { setCfg({ ...(opts.data.defaults as EEConfig), ...c.config }); return; }
+      if (c) { loadConfig(c.config); return; }
     }
     const ds = datasets.data.find((d) => d.id === "us_core" && d.cached)?.id ?? datasets.data.find((d) => d.cached)?.id ?? datasets.data[0]?.id ?? "";
     const last = datasets.data.find((d) => d.id === ds)?.current?.last_date ?? opts.data.policy.ceiling;
@@ -127,15 +127,20 @@ export function Builder() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opts.data, datasets.data, configs.data]);
 
+  function loadConfig(c: EEConfig) {
+    setCfg({ ...(opts.data?.defaults as EEConfig), ...c });
+    setUniverse(universeChoiceOf(c));
+    setCheck(null);
+  }
+
   const exitMap = useMemo(() => new Map((cat.data?.exits ?? []).map((e) => [e.id, e])), [cat.data]);
   const sigName = useMemo(() => new Map([...(cat.data?.entry_signals ?? []), ...(cat.data?.exit_signals ?? [])].map((s) => [s.id, s.name])), [cat.data]);
 
-  if (!cfg || !opts.data || !cat.data) return <div className="space-y-3"><PageHeader title="Experiment Builder" /><EESubNav />{problem ? <ProblemPanel {...problem} /> : <Loading rows={10} />}</div>;
+  if (!cfg || !opts.data || !cat.data) return <div className="space-y-3"><PageHeader title="New entry-exit study" />{problem ? <ProblemPanel {...problem} /> : <Loading rows={10} />}</div>;
   const c = cat.data;
   const set = (patch: Partial<EEConfig>) => { setCfg({ ...cfg, ...patch }); setCheck(null); };
   const final = (): EEConfig => {
-    const out = { ...cfg };
-    if (universeMode === "custom") { out.universe = symbols.split(/[\s,;]+/).map((s) => s.trim().toUpperCase()).filter(Boolean); out.universe_name = null; } else out.universe = null;
+    const out = applyUniverse({ ...cfg }, universe);
     if (out.partition_scheme !== "custom") out.partitions = [];
     return out;
   };
@@ -150,7 +155,7 @@ export function Builder() {
     if (plan.components.length) out.push(`The plan being composed (${plan.components.map((x) => x.id).join(" + ")}) has not been added: press "Add plan" or remove its components.`);
     if (c.start >= c.end) out.push(`The start date (${c.start}) must be before the end date (${c.end}).`);
     if (opts.data && c.end > opts.data.policy.ceiling) out.push(`The end date ${c.end} is after the data ceiling ${opts.data.policy.ceiling} (2026 onward is HOLDOUT data).`);
-    if (universeMode === "custom" && (c.universe ?? []).length < 2) out.push("A custom universe needs at least two symbols (comma or space separated).");
+    if (universe.mode === "custom" && (c.universe ?? []).length < 2) out.push("A custom universe needs at least two symbols (comma or space separated).");
     for (const s of c.entries) if (s.kind === "combination" && s.components.length < 2) out.push(`Combination "${s.name}" needs at least two components.`);
     for (const x of c.exits) for (const comp of x.components)
       if (comp.id === "signal_exit" && !comp.signal) out.push(`Plan "${x.name || x.components.map((y) => y.id).join(" + ")}": the "Any catalog signal" exit needs a signal chosen.`);
@@ -182,13 +187,12 @@ export function Builder() {
 
   return (
     <div className="space-y-3">
-      <PageHeader title="Entry-Exit Experiment Builder"
+      <PageHeader title="New entry-exit study"
         sub="Every entry event is replayed with every exit plan (identical events), against matched random entries under the same exit; the event-driven engine backtests the cells per partition."
         actions={<>
           <Button size="sm" variant="outline" onClick={doValidate} disabled={validate.isPending} data-action="validate"><CheckCircle2 className="size-3.5" />Validate</Button>
           <Button size="sm" onClick={doLaunch} disabled={launch.isPending} data-action="launch"><Play className="size-3.5" />Launch</Button>
         </>} />
-      <EESubNav />
       {problem && <ProblemPanel {...problem} />}
       <div className="grid gap-3 xl:grid-cols-[1fr_380px]">
         <div className="space-y-3">
@@ -268,16 +272,7 @@ export function Builder() {
           </Panel>
 
           <Panel title="Data, holding and risk">
-            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-              <Field label="Dataset"><ChoiceSelect value={cfg.dataset} onChange={(v) => set({ dataset: v })} options={(datasets.data ?? []).map((d) => ({ value: d.id, label: `${d.id}${d.cached ? "" : " (not cached)"}` }))} aria-label="dataset" /></Field>
-              <Field label="Universe">
-                <ChoiceSelect value={universeMode === "custom" ? "__custom" : cfg.universe_name ?? ""} aria-label="universe"
-                  onChange={(v) => { if (v === "__custom") setUniverseMode("custom"); else { setUniverseMode("named"); set({ universe_name: v }); } }}
-                  options={[...(universes.data ?? []).map((u) => ({ value: u.name, label: `${u.name}${u.symbols ? ` (${u.symbols.length})` : ""}` })), { value: "__custom", label: "custom list" }]} />
-              </Field>
-              <Field label="Start"><Input type="date" className="h-8 text-xs" value={cfg.start} onChange={(e) => set({ start: e.target.value })} /></Field>
-              <Field label="End"><Input type="date" className="h-8 text-xs" value={cfg.end} max={opts.data.policy.ceiling} onChange={(e) => set({ end: e.target.value })} /></Field>
-              {universeMode === "custom" && <Field label="Symbols" className="col-span-full"><Input className="h-8 text-xs" value={symbols} onChange={(e) => setSymbols(e.target.value)} placeholder="AAPL, MSFT, ..." /></Field>}
+            <DataWindowFields cfg={cfg} set={set} universe={universe} onUniverse={(u) => { setUniverse(u); setCheck(null); }} policy={opts.data.policy}>
               <Field label="Event sampling" hint="first: the first session of each run of triggers; all: every trigger; cooldown: skip a symbol's triggers for N sessions">
                 <ChoiceSelect value={cfg.sampling.mode} onChange={(v) => set({ sampling: { ...cfg.sampling, mode: v as EEConfig["sampling"]["mode"] } })} options={["first", "all", "cooldown"].map((x) => ({ value: x, label: x }))} aria-label="sampling" />
               </Field>
@@ -288,7 +283,7 @@ export function Builder() {
               <Field label="Min price ($, raw)"><NumberInput value={cfg.eligibility.min_price} min={0} onChange={(v) => set({ eligibility: { ...cfg.eligibility, min_price: v ?? 0 } })} /></Field>
               <Field label="Min $ volume (median 21d)"><NumberInput value={cfg.eligibility.min_dollar_volume} min={0} onChange={(v) => set({ eligibility: { ...cfg.eligibility, min_dollar_volume: v ?? 0 } })} /></Field>
               <Field label="Min history (bars)"><NumberInput value={cfg.eligibility.min_history} min={1} onChange={(v) => set({ eligibility: { ...cfg.eligibility, min_history: v ?? 126 } })} /></Field>
-            </div>
+            </DataWindowFields>
           </Panel>
 
           <Panel title="Portfolio backtests (event-driven engine) and costs">
@@ -347,20 +342,15 @@ export function Builder() {
           </Panel>
         </div>
         <div className="space-y-3">
-          <Panel title="Experiment">
+          <Panel title="Study">
             <div className="space-y-2">
-              <Field label="Name"><Input className="h-8 text-xs" value={cfg.name ?? ""} onChange={(e) => set({ name: e.target.value })} /></Field>
-              <Field label="Notes"><Input className="h-8 text-xs" value={cfg.notes ?? ""} onChange={(e) => set({ notes: e.target.value })} /></Field>
+              <Field label="Name"><Input className="h-8 text-xs" value={cfg.name ?? ""} onChange={(e) => set({ name: e.target.value })} aria-label="experiment name" /></Field>
+              <Field label="Notes"><Input className="h-8 text-xs" value={cfg.notes ?? ""} onChange={(e) => set({ notes: e.target.value })} aria-label="notes" /></Field>
               <KV rows={[["Entries", String(nEntries)], ["Exit plans (approx.)", String(nExits)], ["Cells", String(nEntries * nExits)]]} />
-              <div className="flex gap-2">
-                <Input className="h-8 text-xs" placeholder="config name" value={saveName} onChange={(e) => setSaveName(e.target.value)} />
-                <Button size="sm" variant="outline" disabled={!saveName} onClick={() => save.mutate({ name: saveName, config: final() }, { onSuccess: () => toast.success("saved"), onError: report })}><Save className="size-3.5" />Save</Button>
-              </div>
-              {(configs.data ?? []).length > 0 && (
-                <div className="space-y-0.5 text-2xs">{configs.data!.slice(0, 8).map((x) => <div key={x.config_id}><a className="text-primary underline" href={`/entry-exit/new?config=${x.config_id}`}>{x.name}</a> <span className="text-muted-foreground">{x.created_at_utc.slice(0, 10)}</span></div>)}</div>
-              )}
             </div>
           </Panel>
+          <SavedConfigsPanel configs={configs.data} onLoad={loadConfig} onDelete={(id) => del.mutate(id)} onError={report}
+            onSave={(name) => save.mutateAsync({ name, config: final() })} saving={save.isPending} />
           {check && (
             <Panel title="Validation">
               <div className="space-y-2 text-xs">

@@ -1,4 +1,4 @@
-"""Typed mirror of the ptrade API v1 responses the adapter reads (QwenWorkspace/paper_trading gui/v1/schemas.py and
+"""Typed mirror of the ptrade API v1 responses the adapter reads (Ops/paper_trading gui/v1/schemas.py and
 web/openapi.json at 792758b: the required field sets of Book, BookDetail, Evidence, Freshness, SeriesStyle,
 LivePoint, AsOf, Picks and Equity). The client parses with extra fields allowed (an additive API change must not
 break it); the mock host's responses are checked against the same models with extras forbidden."""

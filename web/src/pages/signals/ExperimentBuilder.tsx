@@ -1,25 +1,28 @@
-// Experiment Builder: signals (single, several, whole families, parameter comparisons, combinations), data (dataset,
+// New signal study: signals (single, several, whole families, parameter comparisons, combinations), data (dataset,
 // universe, window inside the dataset's coverage, frequency), the event-study method (horizons, entry timing, event
 // sampling), the controls (matched-random stocks, random entry dates, benchmarks), eligibility, chronological
 // partitions and the statistics. Validate, save, launch, or clone a previous experiment (?from=) or a saved config.
-import { CheckCircle2, Play, Plus, Save, Trash2, X } from "lucide-react";
+import { CheckCircle2, Play, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
-import { api, ApiError } from "@/api/client";
-import { useDatasets, useUniverses } from "@/api/hooks";
+import { api, describeError } from "@/api/client";
+import { useDatasets } from "@/api/hooks";
 import {
   useCatalog, useDeleteSignalConfig, useLaunchSignals, useOptions, useSaveSignalConfig, useSignalConfigs, useValidateSignals,
   type AnySpec, type CombinationSpec, type ExperimentDetail, type Partition, type SignalExperimentConfig, type SignalSpec, type ValidateResult,
 } from "@/api/signals";
 import { ChoiceSelect, Field, NumberInput } from "@/components/ConfigForm";
-import { Empty, ErrorState, KV, Loading, PageHeader, Panel, PeriodBadge } from "@/components/common";
+import { Empty, KV, Loading, PageHeader, Panel, PeriodBadge } from "@/components/common";
+import { DataWindowFields } from "@/components/DataWindow";
+import { ProblemPanel } from "@/components/Progress";
+import { SavedConfigsPanel } from "@/components/SavedConfigs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input, Switch, Textarea } from "@/components/ui/primitives";
-import * as fmt from "@/lib/format";
+import { applyUniverse, parseSymbols, universeChoiceOf, type UniverseChoice } from "@/lib/dataWindow";
 import { navigate, useLocation } from "@/lib/router";
-import { DirectionBadge, ScopeBadge, SubNav } from "@/pages/signals/common";
+import { DirectionBadge, ScopeBadge } from "@/pages/signals/common";
 
 const csvNums = (s: string) => s.split(/[\s,;]+/).map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0);
 
@@ -42,17 +45,14 @@ export function ExperimentBuilder() {
   const save = useSaveSignalConfig();
   const del = useDeleteSignalConfig();
   const [cfg, setCfg] = useState<SignalExperimentConfig | null>(null);
-  const [universeMode, setUniverseMode] = useState<"named" | "custom">("named");
-  const [symbols, setSymbols] = useState("");
+  const [universe, setUniverse] = useState<UniverseChoice>({ mode: "named", symbols: "" });
   const [horizonsText, setHorizonsText] = useState("1, 5, 10, 20, 60");
   const [benchText, setBenchText] = useState("SPY");
   const [addId, setAddId] = useState("");
   const [addFamily, setAddFamily] = useState("");
   const [grid, setGrid] = useState({ id: "", param: "", values: "" });
-  const [problem, setProblem] = useState<string | null>(null);
+  const [problem, setProblem] = useState<ReturnType<typeof describeError> | null>(null);
   const [check, setCheck] = useState<ValidateResult | null>(null);
-  const [saveName, setSaveName] = useState("");
-  const universes = useUniverses(cfg?.dataset);
 
   useEffect(() => {
     if (cfg || !opts.data || !datasets.data || !cat.data) return;
@@ -61,7 +61,7 @@ export function ExperimentBuilder() {
     if (from) {
       api.get<ExperimentDetail>(`/signals/experiments/${encodeURIComponent(from)}`).then((r) => {
         load({ ...r.config, dataset_version: null, resolved_signals: null, analysis_end: null, name: `${r.config.name || from} (copy)` });
-      }).catch((e) => setProblem(String(e)));
+      }).catch((e) => setProblem(describeError(e)));
       return;
     }
     if (saved && configs.data) {
@@ -83,27 +83,20 @@ export function ExperimentBuilder() {
     setCfg({ ...c, partitions: c.partition_scheme === "custom" ? c.partitions : [] });
     setHorizonsText(c.horizons.join(", "));
     setBenchText(c.benchmarks.join(", "));
-    if (c.universe && c.universe.length) { setUniverseMode("custom"); setSymbols(c.universe.join(", ")); } else setUniverseMode("named");
+    setUniverse(universeChoiceOf(c));
   }
 
-  const ds = datasets.data?.find((d) => d.id === cfg?.dataset);
-  const policy = opts.data?.policy;
-  const bounds = useMemo(() => {
-    const first = ds?.current?.first_date, last = ds?.current?.last_date;
-    return { lo: [policy?.backtest_floor, first].filter(Boolean).sort().at(-1), hi: [policy?.ceiling, last].filter(Boolean).sort()[0], last };
-  }, [ds, policy]);
   const sigById = useMemo(() => new Map((cat.data?.signals ?? []).map((s) => [s.id, s])), [cat.data]);
 
-  if (!cfg || !opts.data) return <div className="space-y-3"><PageHeader title="Experiment Builder" /><SubNav />{problem ? <ErrorState error={problem} /> : <Loading rows={10} />}</div>;
+  if (!cfg || !opts.data) return <div className="space-y-3"><PageHeader title="New signal study" />{problem ? <ProblemPanel {...problem} /> : <Loading rows={10} />}</div>;
   const set = (patch: Partial<SignalExperimentConfig>) => { setCfg({ ...cfg, ...patch }); setCheck(null); };
   const final = (): SignalExperimentConfig => {
-    const out: SignalExperimentConfig = { ...cfg, horizons: csvNums(horizonsText), benchmarks: benchText.split(/[\s,;]+/).map((s) => s.trim().toUpperCase()).filter(Boolean) };
-    if (universeMode === "custom") { out.universe = symbols.split(/[\s,;]+/).map((s) => s.trim().toUpperCase()).filter(Boolean); out.universe_name = null; } else out.universe = null;
+    const out: SignalExperimentConfig = applyUniverse({ ...cfg, horizons: csvNums(horizonsText), benchmarks: parseSymbols(benchText) }, universe);
     if (out.primary_horizon && !out.horizons.includes(out.primary_horizon)) out.primary_horizon = null;
     if (out.partition_scheme !== "custom") out.partitions = [];
     return out;
   };
-  const report = (e: unknown) => { const m = e instanceof ApiError ? e.message : String(e); setProblem(m); toast.error(m); };
+  const report = (e: unknown) => { const d = describeError(e); setProblem(d); toast.error(d.title); };
   const doValidate = () => validate.mutate(final(), { onSuccess: (r) => { setProblem(null); setCheck(r); toast.success(`${r.n_signals} signals, ${r.n_tests} tests per partition`); }, onError: report });
   const doLaunch = () => launch.mutate(final(), { onSuccess: (r) => navigate(`/signals/experiments/${r.experiment_id}`), onError: report });
   const m = cfg.matching;
@@ -117,13 +110,12 @@ export function ExperimentBuilder() {
 
   return (
     <div className="space-y-3">
-      <PageHeader title="Experiment Builder" sub="An event study: every trigger is entered at the next open and compared with matched random stocks, random entry dates of the same stock, and benchmarks."
+      <PageHeader title="New signal study" sub="An event study: every trigger is entered at the next open and compared with matched random stocks, random entry dates of the same stock, and benchmarks."
         actions={<>
           <Button size="sm" variant="outline" onClick={doValidate} disabled={validate.isPending} data-action="validate"><CheckCircle2 className="size-3.5" />Validate</Button>
           <Button size="sm" onClick={doLaunch} disabled={launch.isPending} data-action="launch"><Play className="size-3.5" />Launch</Button>
         </>} />
-      <SubNav />
-      {problem && <ErrorState error={problem} />}
+      {problem && <ProblemPanel {...problem} />}
       <div className="grid gap-3 xl:grid-cols-[1fr_360px]">
         <div className="space-y-3">
           <Panel title={`Signals (${nInstances} instances)`}>
@@ -192,19 +184,11 @@ export function ExperimentBuilder() {
           </Panel>
 
           <Panel title="Data">
-            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-              <Field label="Dataset"><ChoiceSelect value={cfg.dataset} onChange={(v) => set({ dataset: v })} aria-label="dataset" options={(datasets.data ?? []).map((d) => ({ value: d.id, label: `${d.id}${d.cached ? "" : " (not cached)"}` }))} /></Field>
-              <Field label="Universe"><ChoiceSelect value={universeMode === "custom" ? "__custom" : cfg.universe_name ?? ""} aria-label="universe"
-                onChange={(v) => { if (v === "__custom") setUniverseMode("custom"); else { setUniverseMode("named"); set({ universe_name: v }); } }}
-                options={[...(universes.data ?? []).map((u) => ({ value: u.name, label: `${u.name}${u.symbols ? ` (${u.symbols.length})` : ""}` })), { value: "__custom", label: "Custom symbols…" }]} /></Field>
-              <Field label={`Start (≥ ${bounds.lo ?? "?"})`}><Input type="date" className="num h-8 text-xs" value={cfg.start} min={bounds.lo} max={bounds.hi} onChange={(e) => set({ start: e.target.value })} aria-label="start" /></Field>
-              <Field label={`End (≤ ${bounds.hi ?? "?"}, last ingested)`}><Input type="date" className="num h-8 text-xs" value={cfg.end} min={bounds.lo} max={bounds.hi} onChange={(e) => set({ end: e.target.value })} aria-label="end" /></Field>
-              {universeMode === "custom" && <Field label="Symbols" className="col-span-2 md:col-span-4"><Textarea className="num text-xs" value={symbols} onChange={(e) => setSymbols(e.target.value)} aria-label="symbols" /></Field>}
+            <DataWindowFields cfg={cfg} set={set} universe={universe} onUniverse={(u) => { setUniverse(u); setCheck(null); }} policy={opts.data.policy}>
               <Field label="Frequency" hint="Bars; horizons count bars of this frequency"><ChoiceSelect value={cfg.frequency} onChange={(v) => set({ frequency: v as "1d" })} aria-label="frequency" options={[{ value: "1d", label: "Daily" }, { value: "1w", label: "Weekly" }, { value: "1mo", label: "Monthly" }]} /></Field>
               <Field label="Benchmarks" hint="Market benchmarks over the same entry and exit sessions"><Input className="num h-8 text-xs" value={benchText} onChange={(e) => setBenchText(e.target.value)} aria-label="benchmarks" /></Field>
               <Toggle label="Sector-ETF benchmark" checked={cfg.sector_benchmark} onChange={(v) => set({ sector_benchmark: v })} disabled={!ref.sector.available} hint={ref.sector.available ? ref.sector.note : "no sector reference data"} />
-            </div>
-            <div className="mt-2 text-2xs text-muted-foreground">Coverage of {cfg.dataset}: <span className="num">{ds?.current?.first_date ?? "?"} … {ds?.current?.last_date ?? "?"}</span>. Universe lists are today's: delisted securities are absent (survivorship bias), and every result says so.</div>
+            </DataWindowFields>
           </Panel>
 
           <Panel title="Event study">
@@ -292,26 +276,14 @@ export function ExperimentBuilder() {
               </div>
             )}
           </Panel>
-          <Panel title="Name and save">
+          <Panel title="Name">
             <div className="space-y-2">
-              <Field label="Experiment name"><Input className="h-8 text-xs" value={cfg.name ?? ""} onChange={(e) => set({ name: e.target.value })} aria-label="experiment name" /></Field>
+              <Field label="Study name"><Input className="h-8 text-xs" value={cfg.name ?? ""} onChange={(e) => set({ name: e.target.value })} aria-label="experiment name" /></Field>
               <Field label="Notes"><Textarea className="text-xs" value={cfg.notes ?? ""} onChange={(e) => set({ notes: e.target.value })} aria-label="notes" /></Field>
-              <div className="flex gap-2">
-                <Input className="h-8 text-xs" placeholder="configuration name" value={saveName} onChange={(e) => setSaveName(e.target.value)} aria-label="config name" />
-                <Button size="sm" variant="outline" disabled={!saveName.trim() || save.isPending} data-action="save"
-                  onClick={() => save.mutate({ name: saveName.trim(), config: final() }, { onSuccess: () => { toast.success("Saved"); setSaveName(""); }, onError: report })}><Save className="size-3.5" />Save</Button>
-              </div>
             </div>
           </Panel>
-          <Panel title={`Saved configurations (${configs.data?.length ?? 0})`} bodyClass="p-1">
-            {(configs.data ?? []).length === 0 ? <div className="p-2 text-xs text-muted-foreground">None yet.</div> : (configs.data ?? []).map((c) => (
-              <div key={c.config_id} className="flex items-center gap-2 rounded px-2 py-1 text-xs hover:bg-accent">
-                <button type="button" className="min-w-0 flex-1 truncate text-left" onClick={() => load(c.config)} title="Load">{c.name}</button>
-                <span className="num text-2xs text-muted-foreground">{fmt.utc(c.created_at_utc).slice(0, 10)}</span>
-                <Button size="icon" variant="ghost" className="size-6" aria-label={`delete ${c.name}`} onClick={() => del.mutate(c.config_id)}><Trash2 className="size-3.5" /></Button>
-              </div>
-            ))}
-          </Panel>
+          <SavedConfigsPanel configs={configs.data} onLoad={load} onDelete={(id) => del.mutate(id)} onError={report}
+            onSave={(name) => save.mutateAsync({ name, config: final() })} saving={save.isPending} />
         </div>
       </div>
     </div>

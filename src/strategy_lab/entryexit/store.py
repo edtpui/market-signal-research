@@ -24,28 +24,24 @@ import datetime as dt
 import hashlib
 import io
 import json
-import os
-import platform
-import sqlite3
 import threading
 import time
 import traceback
 import uuid
-from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-import strategy_lab
+from strategy_lab.catalog import (QueuedStore, git_state, make_readonly, now_utc, package_versions, source_sha256,
+                                  write_owner)
 from strategy_lab.core.strategy import canonical_hash
 from strategy_lab.data.policy import period_labels
 from strategy_lab.entryexit import engine as E
 from strategy_lab.entryexit.components import Common
 from strategy_lab.entryexit.config import EntryExitExperimentConfig
 from strategy_lab.entryexit.plan import PlanRuntime
-from strategy_lab.experiments.store import _git_state, _versions
-from strategy_lab.research.store import _clean, _json, _readonly, _write_parquet, read_parquet
+from strategy_lab.research.store import _clean, _json, _write_parquet, read_parquet
 
 CODE_DIRS = ("entryexit", "signals", "research", "engine", "data")
 MATRIX_METRICS = ("timing_excess", "q_timing", "timing_beat_share", "mean_ret", "median_ret", "win_rate", "profit_factor", "expectancy_r", "avg_bars", "ret_per_session",
@@ -99,44 +95,8 @@ CREATE TRIGGER IF NOT EXISTS ee_locked_no_delete BEFORE DELETE ON ee_locked_resu
 """
 
 
-def pid_alive(pid) -> bool:
-    """Whether a process with this id exists on this host (standard library only)."""
-    try:
-        pid = int(pid)
-    except (TypeError, ValueError):
-        return False
-    if os.name == "nt":
-        import ctypes
-        k = ctypes.windll.kernel32
-        h = k.OpenProcess(0x1000, False, pid)              # PROCESS_QUERY_LIMITED_INFORMATION
-        if not h:
-            return False
-        code = ctypes.c_ulong()
-        ok = k.GetExitCodeProcess(h, ctypes.byref(code))
-        k.CloseHandle(h)
-        return bool(ok) and code.value == 259               # STILL_ACTIVE
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
-def now_utc() -> str:
-    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def code_sha256() -> str:
-    root = Path(strategy_lab.__file__).parent
-    h = hashlib.sha256()
-    for d in CODE_DIRS:
-        for f in sorted((root / d).rglob("*.py")):
-            h.update(f.relative_to(root).as_posix().encode())
-            h.update(f.read_bytes())
-    h.update((root / "strategies" / "entry_exit.py").read_bytes())
-    return h.hexdigest()
+    return source_sha256(CODE_DIRS, extra_files=("strategies/entry_exit.py",))
 
 
 def cell_id(ei: int, pi: int) -> str:
@@ -168,23 +128,15 @@ def flat_row(summ: dict) -> dict:
                 timing_p=(summ.get("timing") or {}).get("p"), timing_beat_share=(summ.get("timing") or {}).get("beat_share"))
 
 
-class EntryExitStore:
-    def __init__(self, root: Path, catalog: Path, lab, workers: int = 1):
-        self.root = Path(root)
-        self.root.mkdir(parents=True, exist_ok=True)
-        self.catalog_path = Path(catalog)
-        self.lab = lab
-        self._cancel: dict[str, threading.Event] = {}
-        self.pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="entry-exit")
-        self.futures: dict[str, Future] = {}
-        with self._db() as c:
-            c.executescript(DDL)
+class EntryExitStore(QueuedStore):
+    TABLE, KEY, CONFIGS_TABLE = "ee_experiments", "experiment_id", "ee_saved_configs"
+    CONFIG_MODEL = EntryExitExperimentConfig
+    CONFIG_ID_PREFIX, CONFIG_ID_HEX = "eec-", 10
+    LABEL = "entry-exit experiment"
+    JSON_COLS, BOOL_COLS = ("partitions", "summary", "reproduction"), ("evaluate_test",)
 
-    def _db(self) -> sqlite3.Connection:
-        c = sqlite3.connect(self.catalog_path, timeout=30, isolation_level=None)
-        c.row_factory = sqlite3.Row
-        c.execute("PRAGMA journal_mode=WAL")
-        return c
+    def __init__(self, root: Path, catalog: Path, lab, workers: int = 1):
+        super().__init__(root, catalog, lab, DDL, workers, "entry-exit")
 
     # -- creation ---------------------------------------------------------------------------------------------------
     def resolve(self, cfg: EntryExitExperimentConfig):
@@ -197,7 +149,7 @@ class EntryExitStore:
         d = self.root / eid
         d.mkdir(parents=True)
         _json(_clean(resolved.model_dump(mode="json")), d / "config.json")
-        self._write_owner(d)
+        write_owner(d)
         parts = [dict(name=p.name, role=p.role, start=p.start.isoformat(), end=p.end.isoformat(),
                       locked=p.role == "test" and not resolved.evaluate_test) for p in resolved.partitions]
         with self._db() as c:
@@ -213,65 +165,6 @@ class EntryExitStore:
                        ",".join(period_labels(resolved.start, resolved.analysis_end))))
         return eid
 
-    def submit(self, eid: str) -> Future:
-        f = self.pool.submit(self._safe_execute, eid)
-        self.futures[eid] = f
-        return f
-
-    def _safe_execute(self, eid: str):
-        try:
-            return self.execute(eid)
-        except Exception:  # noqa: BLE001 - recorded on the experiment
-            return None
-
-    def cancel(self, eid: str) -> dict:
-        meta = self.get(eid)
-        if meta is None:
-            raise KeyError(f"no entry-exit experiment {eid}")
-        if meta["status"] not in ("queued", "running"):
-            return dict(experiment_id=eid, status=meta["status"], cancelled=False)
-        self._cancel.setdefault(eid, threading.Event()).set()
-        if meta["status"] == "queued":
-            f = self.futures.get(eid)
-            if f is not None and f.cancel():
-                self._set(eid, status="cancelled", finished_at_utc=now_utc(), error="cancelled before it started")
-                _readonly(self.root / eid)
-        return dict(experiment_id=eid, status="cancelling", cancelled=True)
-
-    @staticmethod
-    def _write_owner(d: Path) -> None:
-        """The process that owns (creates, then executes) the experiment: recovery leaves it alone while it lives."""
-        (d / "owner.json").write_text(json.dumps(dict(pid=os.getpid(), host=platform.node(), at_utc=now_utc())),
-                                      encoding="utf-8")
-
-    def recover_interrupted(self) -> int:
-        """Marks queued or running experiments failed when their owner process is gone (another process, e.g. a
-        script, may be executing one: it is left alone). An experiment without an owner file is treated as
-        interrupted."""
-        with self._db() as c:
-            rows = [r[0] for r in c.execute("SELECT experiment_id FROM ee_experiments WHERE status IN ('running', "
-                                            "'queued')")]
-        n = 0
-        for eid in rows:
-            f = self.root / eid / "owner.json"
-            try:
-                own = json.loads(f.read_text(encoding="utf-8")) if f.exists() else None
-            except (OSError, ValueError):
-                own = None
-            if own and own.get("host") == platform.node() and own.get("pid") != os.getpid() and pid_alive(own["pid"]):
-                continue
-            with self._db() as c:
-                n += c.execute("UPDATE ee_experiments SET status='failed', finished_at_utc=?, error=? WHERE "
-                               "experiment_id=? AND status IN ('running', 'queued')",
-                               (now_utc(), "interrupted: the process stopped before the experiment finished",
-                                eid)).rowcount
-        return n
-
-    def _set(self, eid: str, **cols) -> None:
-        keys = ", ".join(f"{k}=?" for k in cols)
-        with self._db() as c:
-            c.execute(f"UPDATE ee_experiments SET {keys} WHERE experiment_id=?", (*cols.values(), eid))
-
     # -- execution --------------------------------------------------------------------------------------------------
     def execute(self, eid: str) -> dict:
         meta = self.get(eid)
@@ -282,7 +175,7 @@ class EntryExitStore:
         d = self.root / eid
         cfg = self.config(eid)
         cancel = self._cancel.setdefault(eid, threading.Event())
-        self._write_owner(d)
+        write_owner(d)
         self._set(eid, status="running", started_at_utc=now_utc(), stage="prepare")
         t0 = time.time()
         try:
@@ -291,13 +184,13 @@ class EntryExitStore:
             self._set(eid, status=status, finished_at_utc=now_utc(), stage="done",
                       summary=json.dumps(_clean(dict(out, seconds=round(time.time() - t0, 1)))),
                       error="cancelled by the user" if status == "cancelled" else None)
-            _readonly(d)
+            make_readonly(d)
             return dict(experiment_id=eid, status=status, summary=out)
         except Exception as e:  # noqa: BLE001 - recorded, then re-raised
             (d / "error.txt").write_text(traceback.format_exc(), encoding="utf-8")
             status = "cancelled" if isinstance(e, E.Cancelled) else "failed"
             self._set(eid, status=status, finished_at_utc=now_utc(), error=f"{type(e).__name__}: {e}"[:2000])
-            _readonly(d)
+            make_readonly(d)
             if status == "cancelled":
                 return dict(experiment_id=eid, status=status)
             raise
@@ -595,8 +488,8 @@ class EntryExitStore:
 
     def _manifest(self, eid, cfg, es, hashes, n_cells, tests) -> dict:
         prior = self.prior_usage(eid)
-        return dict(experiment_id=eid, created_utc=now_utc(), code_sha256=code_sha256(), git=_git_state(),
-                    versions=_versions(), dataset=cfg.dataset, dataset_version=cfg.dataset_version,
+        return dict(experiment_id=eid, created_utc=now_utc(), code_sha256=code_sha256(), git=git_state(),
+                    versions=package_versions(), dataset=cfg.dataset, dataset_version=cfg.dataset_version,
                     config_hash=cfg.config_hash(), methodology_hash=cfg.methodology_hash(), cells=hashes,
                     n_cells=n_cells, n_tests=sum(1 for t in tests if t["p"] is not None), prior_usage=prior,
                     timings=es.timings,
@@ -604,37 +497,6 @@ class EntryExitStore:
                           "bias)")
 
     # -- reading ----------------------------------------------------------------------------------------------------
-    def get(self, eid: str) -> dict | None:
-        with self._db() as c:
-            r = c.execute("SELECT * FROM ee_experiments WHERE experiment_id=?", (eid,)).fetchone()
-        if r is None:
-            return None
-        out = dict(r)
-        for k in ("partitions", "summary", "reproduction"):
-            out[k] = json.loads(out[k]) if out.get(k) else None
-        out["periods"] = out["periods"].split(",") if out.get("periods") else []
-        out["evaluate_test"] = bool(out.get("evaluate_test"))
-        return out
-
-    def list(self, limit: int = 500) -> list[dict]:
-        with self._db() as c:
-            ids = [r[0] for r in c.execute("SELECT experiment_id FROM ee_experiments ORDER BY created_at_utc DESC "
-                                           "LIMIT ?", (limit,))]
-        return [self.get(i) for i in ids]
-
-    def path(self, eid: str) -> Path:
-        p = (self.root / eid).resolve()
-        if self.root.resolve() not in p.parents or not p.is_dir():
-            raise KeyError(f"no entry-exit experiment {eid}")
-        return p
-
-    def config(self, eid: str) -> EntryExitExperimentConfig:
-        return EntryExitExperimentConfig.model_validate_json((self.path(eid) / "config.json").read_text("utf-8"))
-
-    def read_json(self, eid: str, name: str):
-        p = self.path(eid) / name
-        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
-
     def cell(self, eid: str, cid: str) -> dict:
         p = self.path(eid) / "cells" / cid / "summary.json"
         if not p.exists():
@@ -794,22 +656,6 @@ class EntryExitStore:
                    (self.read_json(new, "manifest.json") or {}).get("code_sha256"))
         self._set(new, reproduction=json.dumps(res))
         return res
-
-    def save_config(self, name: str, cfg: EntryExitExperimentConfig) -> str:
-        cid = f"eec-{uuid.uuid4().hex[:10]}"
-        with self._db() as c:
-            c.execute("INSERT INTO ee_saved_configs VALUES (?,?,?,?)", (cid, name, cfg.model_dump_json(), now_utc()))
-        return cid
-
-    def configs(self) -> list[dict]:
-        with self._db() as c:
-            return [dict(config_id=r["config_id"], name=r["name"], config=json.loads(r["config"]),
-                         created_at_utc=r["created_at_utc"])
-                    for r in c.execute("SELECT * FROM ee_saved_configs ORDER BY created_at_utc DESC")]
-
-    def delete_config(self, cid: str) -> bool:
-        with self._db() as c:
-            return c.execute("DELETE FROM ee_saved_configs WHERE config_id=?", (cid,)).rowcount > 0
 
     def imports(self) -> list[dict]:
         with self._db() as c:

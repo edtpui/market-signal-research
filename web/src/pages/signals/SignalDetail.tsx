@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/primitives";
 import * as fmt from "@/lib/format";
 import { Link, navigate } from "@/lib/router";
-import { DirectionBadge, ScopeBadge, SubNav, VerdictBadge, ci, pct, pval } from "@/pages/signals/common";
+import { DirectionBadge, ScopeBadge, VerdictBadge, ci, pct, pval } from "@/pages/signals/common";
 import type { Verdict } from "@/api/signals";
 
 const num = (r: Row, k: string) => (typeof r[k] === "number" ? (r[k] as number) : null);
@@ -62,7 +62,7 @@ export function SignalDetailPage({ id }: { id: string }) {
   }, [insp.data]);
 
   if (def.isLoading) return <div className="space-y-3"><PageHeader title={id} /><Loading rows={10} /></div>;
-  if (def.error || !def.data) return <div className="space-y-3"><PageHeader title={id} /><SubNav /><ErrorState error={def.error ?? "not found"} /></div>;
+  if (def.error || !def.data) return <div className="space-y-3"><PageHeader title={id} /><ErrorState error={def.error ?? "not found"} /></div>;
   const s = def.data;
   const run = () => setAsk({ symbol: symbol.trim().toUpperCase(), dataset: useDs, start, end, params, universe: universeName });
 
@@ -71,7 +71,6 @@ export function SignalDetailPage({ id }: { id: string }) {
       <PageHeader title={<span className="flex items-center gap-2">{s.name} <DirectionBadge d={s.direction} /> <ScopeBadge s={s.scope} /></span>}
         sub={<span className="num">{s.id} · v{s.version} · {s.family_info.name}</span>}
         actions={<Button size="sm" onClick={() => navigate(`/signals/new?signals=${s.id}`)} data-action="test-signal"><FlaskConical className="size-3.5" />Test this signal</Button>} />
-      <SubNav />
       <div className="grid gap-3 xl:grid-cols-[420px_1fr]">
         <div className="space-y-3">
           <Panel title="Definition">

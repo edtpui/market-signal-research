@@ -1,36 +1,11 @@
-// Shared pieces of the Signal Research pages: the sub-navigation, verdict / direction / scope badges, and the
-// number cells used by every results table.
+// Shared pieces of the signal-study pages: verdict / direction / scope badges, and the number cells used by every
+// results table.
 import { ArrowDownRight, ArrowUpRight } from "lucide-react";
-import type { ReactNode } from "react";
 
 import { VERDICT_LABEL, VERDICT_TONE, type Direction, type Verdict } from "@/api/signals";
 import { Badge } from "@/components/ui/badge";
 import * as fmt from "@/lib/format";
-import { Link, useLocation } from "@/lib/router";
 import { cn } from "@/lib/utils";
-
-const TABS = [
-  { to: "/signals", label: "Signal Library", match: (p: string) => p === "/signals" || p.startsWith("/signals/library") },
-  { to: "/signals/new", label: "Experiment Builder", match: (p: string) => p.startsWith("/signals/new") },
-  { to: "/signals/rankings", label: "Signal Rankings", match: (p: string) => p.startsWith("/signals/rankings") },
-  { to: "/signals/history", label: "Research History", match: (p: string) => p.startsWith("/signals/history") || p.startsWith("/signals/experiments") },
-];
-
-export function SubNav({ right }: { right?: ReactNode }) {
-  const { path } = useLocation();
-  return (
-    <div className="mb-3 flex flex-wrap items-center gap-2 border-b pb-2" data-subnav="signals">
-      <div className="inline-flex h-8 items-center rounded-lg bg-muted p-[3px] text-muted-foreground">
-        {TABS.map((t) => (
-          <Link key={t.to} to={t.to} className={cn("rounded-md px-2.5 py-1 text-xs font-medium whitespace-nowrap hover:text-foreground",
-            t.match(path) && "bg-background text-foreground shadow-sm dark:bg-input/30")}>{t.label}</Link>
-        ))}
-      </div>
-      <span className="text-2xs text-muted-foreground">Event studies against matched-random stocks, random entry dates and benchmarks · EXPLORATORY, data ≤ 2025-12-31</span>
-      {right && <div className="ml-auto flex items-center gap-2">{right}</div>}
-    </div>
-  );
-}
 
 export function VerdictBadge({ v, className }: { v: Verdict | null | undefined; className?: string }) {
   if (!v) return <span className="text-muted-foreground">{fmt.DASH}</span>;

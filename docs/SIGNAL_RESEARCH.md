@@ -43,11 +43,13 @@ src/strategy_lab/research/           the event-study engine
   stats.py        cluster bootstrap, randomization p-values, Benjamini-Hochberg, verdicts
   reference.py    SIC -> sector mapping, sector ETFs, optional point-in-time market caps
   store.py        write-once experiment directories, catalog tables, ledgers, jobs, cancellation, reproduction
-  imports.py      researched signal -> generated Strategy Library module
+  imports.py      researched signal -> generated strategy module (Experiments > Strategies)
 src/strategy_lab/strategies/signal_rule.py   the Strategy built from an imported signal (backtest + forward)
 src/strategy_lab/api/signals.py              /api/v1/signals/* routes
-web/src/pages/signals/*                       Signal Library, Signal Details, Experiment Builder, Random
-                                              Benchmarking (experiment results), signal results, Rankings, History
+web/src/pages/signals/*                       Experiments > Signals (library, signal details), New signal
+                                              study, random benchmarking (study results), signal results,
+                                              Results > Signal rankings. Studies are listed in Experiments and
+                                              the usage and test-period ledgers in Results > Research ledgers
 web/src/components/ResearchCharts.tsx         histogram, signed bars with CIs, forest plot, numeric-x lines (SVG)
 web/src/components/SignalChart.tsx            candles + overlays + trigger markers (lightweight-charts)
 ```
@@ -203,7 +205,8 @@ Signal-independent work (data load, indicators, eligibility, groups, forward ret
 done once per experiment; indicators are memoized across signals; signals run on `workers` threads; results are
 written per signal as it finishes; failures are isolated per signal (`error.txt`, status failed) and the others
 continue; experiments can be cancelled (between chunks; partial results keep their BH over completed signals and are
-flagged partial); an interrupted process marks running experiments failed at the next start.
+flagged partial); at the next server start, an experiment whose owner process (`owner.json`) is gone is
+marked failed; one that another live process is executing is left alone.
 
 Measured on this host (2026-11-04), `us_core` ∩ S&P 1500 list (1,493 symbols, 2019-01-02…2024-12-31), volatility +
 sector matching, 1,000 permutations, 5 horizons, 2 workers: preparation 18 s; per signal 4 s (6.8k events) to 31 s
@@ -211,12 +214,12 @@ sector matching, 1,000 permutations, 5 horizons, 2 workers: preparation 18 s; pe
 
 ## 9. From signal to strategy
 
-`POST /api/v1/signals/import` (or "Import to Strategy Library" on a signal's results page) writes a generated,
+`POST /api/v1/signals/import` (or "Import as a strategy" on a signal's results page) writes a generated,
 write-once module to `var/signal_imports/sig_<id>_<hash>.py`. It embeds the record: signal id, version, parameters,
 spec and source sha256; the source experiment (dataset version, universe, window, methodology hash, seed); the
 results per partition and horizon with q-values and verdicts; the validation partitions and any test-period
 evaluations; and an explicit warning that research significance is not trading profitability. The Lab loads that
-directory like `strategies_user/`, so the strategy appears in the Strategy Library (category `signal`, with a
+directory like `strategies_user/`, so the strategy appears under Experiments > Strategies (category `signal`, with a
 provenance panel), runs in the existing backtest engine, and deploys through the existing forward adapter. The rule:
 enter at the next open in the signal's direction (bearish signals short and need `allow_short`), equal
 `position_size`, at most `max_positions`, exit after `hold_bars` (default: the researched primary horizon) or at a

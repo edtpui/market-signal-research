@@ -1,4 +1,4 @@
-# Market Signal Research settings. Relative paths resolve against the project root (projects/strategy_lab).
+# Market Signal Research settings. Relative paths resolve against the project root (strategy_lab).
 
 [data]
 cache_dir = "var/cache"
@@ -15,18 +15,18 @@ user_dir = "strategies_user"   # custom strategy modules (*.py), discovered at s
 
 [forward]
 dir = "var/forward"
-# The forward host. "mock" = the in-workspace mock of ptrade's basket host (SIMULATED, <= 2025 data).
-# The operational ptrade API (pt-web, /api/v1) serves HOLDOUT/FWD evidence and is disabled in ClaudeWorkspace;
-# set ptrade_api_url only in an operational deployment after approval.
-host = "mock"
+# Forward deployments run on the in-workspace mock of ptrade's basket host (SIMULATED, <= 2025 data), or are
+# exported as a bundle for the operator to apply to ptrade. The operational ptrade API (pt-web, /api/v1) serves
+# HOLDOUT/FWD evidence and is disabled in Lab; set ptrade_api_url only in an operational deployment
+# after approval.
 ptrade_api_url = ""
 mock_dataset = "us_core"
 
 [ptrade]
-# Deploy-time checks against ptrade's basket contract (src/strategy_lab/paper/contract.py).
+# Deploy-time checks against ptrade's basket contract (src/strategy_lab/paper/contract.py; the ptrade commit it
+# mirrors is contract.SOURCE_COMMIT).
 # universe_file: a copy of ptrade's config/universe.txt; empty = the deploy check reports the universe as unchecked.
 universe_file = ""
-contract_commit = "792758b"
 
 [signal_research]
 # Signal Research Lab (docs/SIGNAL_RESEARCH.md). Experiments and imported-signal strategy modules are generated
@@ -35,7 +35,7 @@ contract_commit = "792758b"
 # exists in this workspace, so market-cap matching is refused rather than approximated.
 dir = "var/signal_research"
 imports_dir = "var/signal_imports"
-sector_file = "../../data/sec_edgar/companies.csv"
+sector_file = "../data/sec_edgar/companies.csv"
 market_cap_file = ""
 workers = 1                    # experiments run one at a time; each runs its signals on its own `workers` threads
 
@@ -43,33 +43,33 @@ workers = 1                    # experiments run one at a time; each runs its si
 sector_etfs = ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY"]
 index_etfs = ["SPY", "QQQ", "IWM", "IJH", "IJR"]
 mega_caps = ["AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "BRK-B", "JPM", "JNJ", "XOM", "V", "PG", "UNH", "HD", "MA"]
-sp1500_file = "../../data/universe_us/universe_us.csv"   # in_sp1500 == 1 (today's list: survivorship bias)
+sp1500_file = "../data/universe_us/universe_us.csv"   # in_sp1500 == 1 (today's list: survivorship bias)
 
 [[dataset]]
 id = "us_core"
 name = "US large + mid/small caps, index and sector ETFs (yfinance, 2018-2025)"
 provider = "yfinance_csv"
-paths = ["../../data/yf_2018_2025", "../../data/yf_2018_2025_midsmall", "../../data/yf_etf_2008_2025",
-         "../../data/yf_macro_2018_2025"]
-description = "Research downloads in ClaudeWorkspace/data. Adjusted OHLCV + raw close/volume. Universe lists are today's (survivorship bias)."
+paths = ["../data/yf_2018_2025", "../data/yf_2018_2025_midsmall", "../data/yf_etf_2008_2025",
+         "../data/yf_macro_2018_2025"]
+description = "Research downloads in Lab/data. Adjusted OHLCV + raw close/volume. Universe lists are today's (survivorship bias)."
 
 [[dataset]]
 id = "us_large"
 name = "US large caps + SPY (yfinance, 2018-2025)"
 provider = "yfinance_csv"
-paths = ["../../data/yf_2018_2025"]
+paths = ["../data/yf_2018_2025"]
 
 [[dataset]]
 id = "etf_macro"
 name = "Index, sector ETFs and macro series (yfinance, 2018-2025)"
 provider = "yfinance_csv"
-paths = ["../../data/yf_etf_2008_2025", "../../data/yf_macro_2018_2025"]
+paths = ["../data/yf_etf_2008_2025", "../data/yf_macro_2018_2025"]
 
 [[dataset]]
 id = "us_other"
 name = "Other US listings (yfinance, 2018-2025)"
 provider = "yfinance_csv"
-paths = ["../../data/yf_2018_2025_other"]
+paths = ["../data/yf_2018_2025_other"]
 
 [[dataset]]
 id = "synthetic"

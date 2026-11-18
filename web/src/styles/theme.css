@@ -129,6 +129,11 @@
     font-size: 13px;
     -webkit-font-smoothing: antialiased;
   }
+  /* Grid items default to min-width:auto, so one wide table would stretch its column (and the page) past the
+     viewport instead of scrolling inside its own container. */
+  .grid > * {
+    min-width: 0;
+  }
   .num {
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;

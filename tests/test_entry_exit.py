@@ -545,6 +545,18 @@ def test_random_entries_are_calibrated_and_an_oracle_is_detected(elab):
     assert orc["p"] < 0.01 and orc["excess"] > 0.01 and orc["verdict"]["category"] == "supported"
 
 
+def test_saved_configurations_round_trip(elab):
+    R = elab.entry_exit
+    cfg = ecfg(entries=[{"kind": "signal", "id": "t_random4"}], exit_ids=["time_5d"], baseline_exit=None,
+               portfolio={"run": "none"})
+    cid = R.save_config("random entries, 5-day exit", cfg)
+    assert cid.startswith("eec-") and len(cid) == 14
+    got = R.configs()
+    assert [c["config_id"] for c in got] == [cid] and got[0]["name"] == "random entries, 5-day exit"
+    assert got[0]["config"]["exit_ids"] == ["time_5d"]
+    assert R.delete_config(cid) and not R.delete_config(cid) and R.configs() == []
+
+
 def test_recovery_leaves_experiments_of_a_live_process_alone(elab):
     """Regression (2026-11-04): starting the API server marked an experiment that a script was executing as
     interrupted. Recovery now checks the owner process."""

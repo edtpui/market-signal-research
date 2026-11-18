@@ -9,7 +9,7 @@ import { DataTable, type Col } from "@/components/DataTable";
 import { ErrorState, Loading, PageHeader, Panel, PeriodBadge } from "@/components/common";
 import * as fmt from "@/lib/format";
 import { navigate } from "@/lib/router";
-import { EESubNav, numc, pctc, qv } from "@/pages/entryexit/common";
+import { numc, pctc, qv } from "@/pages/entryexit/common";
 import { VerdictBadge } from "@/pages/signals/common";
 
 const BOARD = {
@@ -60,8 +60,7 @@ export function Leaderboards() {
   ];
   return (
     <div className="space-y-3">
-      <PageHeader title="Leaderboards" sub={<span className="flex items-center gap-2">Ranked within one partition role; {role === "train" ? <PeriodBadge period="IS" /> : <PeriodBadge period="OOS" />} rows are never mixed. Rankings are descriptive: q-values are per experiment.</span>} />
-      <EESubNav />
+      <PageHeader title="Entry-exit leaderboards" sub={<span className="flex items-center gap-2">Ranked within one partition role; {role === "train" ? <PeriodBadge period="IS" /> : <PeriodBadge period="OOS" />} rows are never mixed. Rankings are descriptive: q-values are per experiment.</span>} />
       <Panel title={BOARD[board as keyof typeof BOARD]} bodyClass="p-0" actions={
         <div className="flex flex-wrap items-end gap-2">
           <Field label="Board"><ChoiceSelect value={board} onChange={setBoard} className="h-7 w-56 text-xs" options={Object.entries(BOARD).map(([k, v]) => ({ value: k, label: v.split(" (")[0] }))} aria-label="board" /></Field>

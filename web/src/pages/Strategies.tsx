@@ -7,16 +7,8 @@ import { Empty, ErrorState, KV, Loading, PageHeader, Panel } from "@/components/
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import * as fmt from "@/lib/format";
+import { ptradeCompatible } from "@/lib/ptrade";
 import { Link, navigate } from "@/lib/router";
-
-export function ptradeCompatible(s: Pick<StrategyInfo, "required_fields" | "order_types" | "long_only">): { ok: boolean; why: string } {
-  const extra = s.required_fields.filter((f) => !["open", "close"].includes(f));
-  const orders = s.order_types.filter((o) => o !== "market");
-  if (extra.length) return { ok: false, why: `needs ${extra.join(", ")} (ptrade Frames carry open/close only)` };
-  if (orders.length) return { ok: false, why: `uses ${orders.join(", ")} orders (market only on open/close bars)` };
-  if (!s.long_only) return { ok: false, why: "may short (ptrade basket books are long only)" };
-  return { ok: true, why: "open/close bars, market orders, long only" };
-}
 
 const cols: Col<StrategyInfo>[] = [
   { id: "name", header: "Strategy", value: (s) => s.name, cell: (s) => <div><div className="font-medium">{s.name}</div><div className="num text-2xs text-muted-foreground">{s.id}</div></div> },
@@ -34,11 +26,11 @@ export function StrategiesPage({ id }: { id?: string }) {
   const detail = useStrategy(id);
   return (
     <div className="space-y-3">
-      <PageHeader title="Strategy Library" sub="Built-in strategies and user modules in strategies_user/. Every run records the strategy's source sha256." />
+      <PageHeader title="Strategies" sub="Built-in strategies and user modules in strategies_user/. Every run records the strategy's source sha256." />
       {list.error && <ErrorState error={list.error} retry={list.refetch} />}
       <div className={id ? "grid gap-3 xl:grid-cols-[1fr_1.2fr]" : ""}>
         <Panel title="Strategies">
-          {list.isLoading ? <Loading rows={6} /> : <DataTable name="strategies" rows={list.data?.strategies ?? []} cols={cols} onRowClick={(s) => navigate(`/strategies/${s.id}`)} filter />}
+          {list.isLoading ? <Loading rows={6} /> : <DataTable name="strategies" rows={list.data?.strategies ?? []} cols={cols} onRowClick={(s) => navigate(`/library/strategies/${encodeURIComponent(s.id)}`)} filter />}
           {(list.data?.errors ?? []).map((e) => <div key={e.file} className="mt-2 text-xs text-neg">Failed to load <span className="num">{e.file}</span>: {e.error}</div>)}
         </Panel>
         {id && (
@@ -144,7 +136,7 @@ function EEProvenancePanel({ p }: { p: EEProvenance }) {
         ["Data", <span className="num">{r.dataset}@{r.dataset_version} · {r.universe_name ?? "custom"} ({r.n_symbols}) · {r.start} … {r.end}</span>],
         ["Method", <span className="num">seed {r.seed} · methodology {r.methodology_hash.slice(0, 10)}</span>],
         ["Test period", p.validation.test_evaluated ? "evaluated in the source experiment" : "locked, not evaluated"],
-        ["Forward eligibility", "needs a finished backtest of this strategy version (Backtesting) before deployment"],
+        ["Forward eligibility", "needs a finished backtest of this strategy version (New backtest) before deployment"],
       ]} />
       <table className="w-full text-xs">
         <thead><tr className="border-b text-2xs text-muted-foreground"><th className="py-1 text-left font-medium">Partition</th><th className="text-right font-medium">trades</th><th className="text-right font-medium">mean</th><th className="text-right font-medium">excess vs random</th><th className="text-right font-medium">q</th><th className="text-right font-medium">Sharpe</th><th className="text-right font-medium">CAGR</th><th className="pl-2 text-left font-medium">Verdict</th></tr></thead>

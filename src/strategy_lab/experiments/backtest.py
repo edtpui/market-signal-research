@@ -2,7 +2,6 @@
 its output into result tables and metrics. Used by the experiment store, reproduction and forward reconciliation."""
 from __future__ import annotations
 
-import datetime as dt
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -168,7 +167,3 @@ def assemble(cfg: ExperimentConfig, cls, out: RunOutput, data: MarketData, bench
                           open_lots=open_lots, holdings=holdings, monthly=mt.monthly_returns(curve), metrics=m,
                           data_report=report, logs=out.logs, final_state=out.final_state,
                           strategy_info=cls.describe(), periods=period_labels(cfg.start, cfg.end))
-
-
-def today_utc() -> str:
-    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

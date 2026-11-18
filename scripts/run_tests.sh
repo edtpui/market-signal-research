@@ -5,7 +5,7 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 py="${SL_PYTHON:-}"
 if [[ -z "$py" ]]; then
-  for c in "$here/.venv/Scripts/python.exe" "$here/.venv/bin/python" "$here/../paper_trading/.venv/Scripts/python.exe"; do
+  for c in "$here/.venv/Scripts/python.exe" "$here/.venv/bin/python" "$here/../.venv-research/Scripts/python.exe"; do
     if [[ -x "$c" ]]; then py="$c"; break; fi
   done
 fi

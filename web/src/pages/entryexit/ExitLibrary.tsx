@@ -10,15 +10,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { navigate } from "@/lib/router";
 import { cn } from "@/lib/utils";
-import { EESubNav } from "@/pages/entryexit/common";
 
 export function ExitLibrary() {
   const cat = useEECatalog();
   const [family, setFamily] = useState<string>("");
   const [sel, setSel] = useState<ExitInfo | null>(null);
   const rows = useMemo(() => (cat.data?.exits ?? []).filter((e) => !family || e.family === family), [cat.data, family]);
-  if (cat.isLoading) return <div className="space-y-3"><PageHeader title="Exit Library" /><EESubNav /><Loading rows={10} /></div>;
-  if (cat.error || !cat.data) return <div className="space-y-3"><PageHeader title="Exit Library" /><EESubNav /><ErrorState error={cat.error ?? "no catalog"} /></div>;
+  if (cat.isLoading) return <div className="space-y-3"><PageHeader title="Exits" /><Loading rows={10} /></div>;
+  if (cat.error || !cat.data) return <div className="space-y-3"><PageHeader title="Exits" /><ErrorState error={cat.error ?? "no catalog"} /></div>;
   const c = cat.data;
   const cols: Col<ExitInfo>[] = [
     { id: "name", header: "Exit", value: (r) => r.name, cell: (r) => <span className="font-medium">{r.name}<span className="ml-1.5 text-2xs text-muted-foreground">{r.id}</span></span> },
@@ -33,9 +32,8 @@ export function ExitLibrary() {
   ];
   return (
     <div className="space-y-3">
-      <PageHeader title="Exit Library" sub={`${c.n_exits} exit components in ${c.exit_families.length} families · ${c.entry_signals.length} entry signals and ${c.exit_signals.length} bearish exit signals from the signal catalog`}
+      <PageHeader title="Exits" sub={`${c.n_exits} exit components in ${c.exit_families.length} families · ${c.entry_signals.length} entry signals and ${c.exit_signals.length} bearish exit signals from the signal catalog`}
         actions={<Button size="sm" onClick={() => navigate("/entry-exit/new")}>New experiment</Button>} />
-      <EESubNav />
       <div className="grid gap-3 xl:grid-cols-[1fr_380px]">
         <Panel title="Exit components" bodyClass="p-0" actions={
           <div className="flex flex-wrap gap-1">

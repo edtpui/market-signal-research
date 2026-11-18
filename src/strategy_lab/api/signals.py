@@ -41,7 +41,7 @@ class ImportRequest(BaseModel):
 
 
 def build_router(lab) -> APIRouter:
-    from strategy_lab.api.app import clean, records
+    from strategy_lab.api.app import records
 
     r = APIRouter(prefix="/api/v1/signals", tags=["signal research"])
     R = lab.research
@@ -163,12 +163,6 @@ def build_router(lab) -> APIRouter:
         _exp(eid)
         df = R.signal_events(eid, key, limit=limit, symbol=symbol)
         return dict(rows=records(df), columns=list(df.columns))
-
-    @r.get("/experiments/{eid}/signals/{key}/nulls")
-    def nulls(eid: str, key: str):
-        _exp(eid)
-        df = R.signal_nulls(eid, key)
-        return dict(columns={c: clean(df[c].tolist()) for c in df.columns})
 
     @r.post("/experiments/{eid}/cancel")
     def cancel(eid: str):

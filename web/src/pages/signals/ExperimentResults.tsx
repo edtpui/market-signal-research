@@ -15,7 +15,7 @@ import { ProgressBar } from "@/components/Progress";
 import { Button } from "@/components/ui/button";
 import * as fmt from "@/lib/format";
 import { navigate } from "@/lib/router";
-import { DirectionBadge, ScopeBadge, SubNav, VERDICT_COLOR, VerdictBadge, ci, pct, pval } from "@/pages/signals/common";
+import { DirectionBadge, ScopeBadge, VERDICT_COLOR, VerdictBadge, ci, pct, pval } from "@/pages/signals/common";
 
 export function ExperimentResults({ id }: { id: string }) {
   const exp = useSignalExperiment(id);
@@ -56,8 +56,8 @@ export function ExperimentResults({ id }: { id: string }) {
     });
   }, [allH.data, cfg]);
 
-  if (exp.isLoading) return <div className="space-y-3"><PageHeader title={id} /><SubNav /><Loading rows={10} /></div>;
-  if (exp.error || !exp.data || !meta || !cfg) return <div className="space-y-3"><PageHeader title={id} /><SubNav /><ErrorState error={exp.error ?? "not found"} /></div>;
+  if (exp.isLoading) return <div className="space-y-3"><PageHeader title={id} /><Loading rows={10} /></div>;
+  if (exp.error || !exp.data || !meta || !cfg) return <div className="space-y-3"><PageHeader title={id} /><ErrorState error={exp.error ?? "not found"} /></div>;
   const d = exp.data;
   const rep = d.study?.report as Record<string, unknown> | undefined;
   const done = meta.progress_done + meta.progress_failed;
@@ -91,9 +91,8 @@ export function ExperimentResults({ id }: { id: string }) {
           {running && <Button size="sm" variant="outline" onClick={() => cancel.mutate(id, { onSuccess: () => toast.info("Cancelling…") })} data-action="cancel"><Ban className="size-3.5" />Cancel</Button>}
           <Button size="sm" variant="outline" onClick={() => navigate(`/signals/new?from=${id}`)} data-action="clone"><Copy className="size-3.5" />Clone</Button>
           <Button size="sm" variant="outline" disabled={meta.status !== "done" || repro.isPending} data-action="reproduce"
-            onClick={() => repro.mutate(id, { onSuccess: () => { toast.success("Reproduction started (Research History)"); } })}><Repeat className="size-3.5" />Reproduce</Button>
+            onClick={() => repro.mutate(id, { onSuccess: () => { toast.success("Reproduction started: it appears in Experiments"); } })}><Repeat className="size-3.5" />Reproduce</Button>
         </>} />
-      <SubNav />
       {meta.error && meta.status !== "cancelled" && <ErrorState error={meta.error} />}
       {running && (
         <ProgressBar value={meta.status === "queued" ? 0 : meta.n_signals ? done / meta.n_signals : null}

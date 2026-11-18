@@ -16,7 +16,7 @@ def api(lab):
     return Client(create_app(lab))
 
 
-def test_status_strategies_and_data(api):
+def test_status_strategies_and_data(api, lab):
     h = api.get("/api/v1/health").json()
     assert h["ok"] and h["policy"]["ceiling"] == "2025-12-31" and h["forward"]["ptrade_api_enabled"] is False
     s = api.get("/api/v1/strategies").json()
@@ -40,6 +40,13 @@ def test_status_strategies_and_data(api):
     assert {x["name"]: len(x.get("symbols", [])) for x in u}["syn"] == 5
     st = api.get("/api/v1/settings").json()
     assert [p["name"] for p in st["research_periods"]] == ["BACK", "IS", "OOS"]
+    # every storage location the app writes to, and the research-lab settings, are reported
+    assert {"cache", "experiments", "catalog", "forward", "user_strategies", "signal_research", "signal_imports",
+            "entry_exit", "entry_exit_imports"} <= set(st["paths"])
+    assert st["paths"]["entry_exit"] == str(lab.settings.entry_exit_dir)
+    assert st["research"]["signal"]["workers"] == 1 and st["research"]["entry_exit"]["workers"] == 1
+    assert st["research"]["signal"]["reference"]["sector"]["available"] is False   # no sector file in the test settings
+    assert st["ptrade"] == {"contract_commit": "792758b", "universe_file": None}
 
 
 def test_backtest_workflow(api, lab):
@@ -116,3 +123,23 @@ def test_forward_workflow(api, lab):
     assert mb[0]["id"] == dep["book_id"] and mb[0]["status"] == "paused"
     assert api.get(f"/mock-ptrade/api/v1/books/{dep['book_id']}/equity").json()["points"]
     assert api.get("/mock-ptrade/api/v1/books/nope").status_code == 404
+
+
+def test_web_ui_shell_is_revalidated_and_hashed_assets_are_immutable(api, tmp_path, monkeypatch):
+    import strategy_lab.api.app as app_mod
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<!doctype html><div id=root></div>", encoding="utf-8")
+    (dist / "assets" / "index-abc123.js").write_text("console.log(1)", encoding="utf-8")
+    (dist / "favicon.svg").write_text("<svg/>", encoding="utf-8")
+    monkeypatch.setattr(app_mod, "WEB_DIST", dist)
+    hdr = lambda r: dict((k.decode(), v.decode()) for k, v in r.headers)
+    cache = lambda r: hdr(r).get("cache-control")
+    shell = str((dist / "index.html").stat().st_size)
+    for path in ("/", "/runs/abc", "/index.html"):                 # the SPA shell, also for client-side routes
+        r = api.get(path)
+        assert r.status_code == 200 and hdr(r)["content-length"] == shell and cache(r) == "no-cache", path
+    r = api.get("/assets/index-abc123.js")
+    assert r.status_code == 200 and cache(r) == "public, max-age=31536000, immutable"
+    assert cache(api.get("/favicon.svg")) == "no-cache"           # unhashed public files are revalidated
+    assert api.get("/api/v1/nope").status_code == 404

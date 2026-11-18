@@ -3,6 +3,7 @@
 import { AlertTriangle, Inbox } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { ApiError, describeError } from "@/api/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/primitives";
@@ -30,14 +31,27 @@ export function Empty({ title, children, className }: { title: string; children?
   );
 }
 
-export function ErrorState({ error, retry, className }: { error: unknown; retry?: () => void; className?: string }) {
-  const msg = error instanceof Error ? error.message : String(error);
+/** A failed request (or any error text). API errors get describeError's title, problem list and hint; a multi-line
+ * message (a server traceback) shows its first line and keeps the rest, whitespace intact, behind "Details". */
+export function ErrorState({ error, retry, className, title }: { error: unknown; retry?: () => void; className?: string; title?: string }) {
+  const d = error instanceof ApiError || error instanceof Error ? describeError(error) : null;
+  const text = d ? d.message : String(error);
+  const [first, ...rest] = text.trim().split("\n");
+  const details = rest.join("\n").trim();
   return (
     <div className={cn("flex items-start gap-3 rounded-md border border-neg/40 bg-neg/5 px-3 py-2.5", className)} data-state="error" role="alert">
       <AlertTriangle className="mt-0.5 size-4 shrink-0 text-neg" />
-      <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium">Could not load this</div>
-        <div className="text-xs break-words text-muted-foreground">{msg}</div>
+      <div className="min-w-0 flex-1 text-xs">
+        <div className="text-sm font-medium">{title ?? (d && error instanceof ApiError ? d.title : "Could not load this")}</div>
+        <div className="break-words text-muted-foreground">{first}</div>
+        {d && d.problems.length > 0 && <ul className="mt-1 list-disc space-y-0.5 pl-4">{d.problems.map((p, i) => <li key={i} className="break-words">{p}</li>)}</ul>}
+        {d?.hint && <div className="mt-1 text-muted-foreground"><span className="font-medium text-foreground">How to fix: </span>{d.hint}</div>}
+        {details && (
+          <details className="mt-1">
+            <summary className="cursor-pointer text-muted-foreground select-none hover:text-foreground">Details</summary>
+            <pre className="num mt-1 max-h-72 overflow-auto rounded-sm bg-background/60 p-2 text-2xs whitespace-pre-wrap">{details}</pre>
+          </details>
+        )}
       </div>
       {retry && <Button size="sm" variant="outline" onClick={retry}>Retry</Button>}
     </div>
@@ -64,7 +78,7 @@ export function StatusBadge({ status, className }: { status: string; className?:
 const PERIOD: Record<string, { bg: string; title: string }> = {
   BACK: { bg: "var(--band-holdout)", title: "2010-2018: read-only reference (here only 2018 warm-up bars)" },
   IS: { bg: "var(--band-dev)", title: "In-sample 2019-2022" },
-  OOS: { bg: "var(--band-test)", title: "Out-of-sample 2023-2025 (spent for the flag research models)" },
+  OOS: { bg: "var(--band-test)", title: "Out-of-sample 2023-2025: already spent by earlier research models, so results here cannot confirm anything" },
   SIMULATED: { bg: "var(--band-descriptive)", title: "Mock paper host: <= 2025 data replayed as forward" },
   FORWARD: { bg: "var(--band-forward)", title: "Forward paper trading" },
   EXPLORATORY: { bg: "var(--band-posthoc)", title: "Dev workspace result: exploratory, not evidence" },

@@ -259,7 +259,7 @@ export function ForwardPage({ id }: { id?: string }) {
       <div className="grid gap-3 xl:grid-cols-[1fr_420px]">
         <Panel title="Deployments">
           {deps.isLoading ? <Loading rows={5} /> : deps.error ? <ErrorState error={deps.error} /> : (deps.data ?? []).length === 0 ? (
-            <Empty title="No deployments">Open a finished run in <Link to="/experiments" className="text-primary underline">Experiment History</Link> and use “Deploy forward”.</Empty>
+            <Empty title="No deployments">Open a finished backtest in <Link to="/experiments?kind=backtest" className="text-primary underline">Experiments</Link> and use “Deploy forward”.</Empty>
           ) : (
             <div className="overflow-x-auto rounded-md border">
               <table className="w-full text-xs" data-deployments>

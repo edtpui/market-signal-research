@@ -30,7 +30,7 @@ def main(argv=None) -> int:
     sub.add_parser("experiments")
     sub.add_parser("forward-advance").add_argument("--to", required=True)
     c = sub.add_parser("check-contract")
-    c.add_argument("--source", default="C:/AI/QwenWorkspace/paper_trading")
+    c.add_argument("--source", default="C:/AI/Workspace/trading/paper_trading")
     a = ap.parse_args(argv)
 
     if a.cmd == "check-contract":

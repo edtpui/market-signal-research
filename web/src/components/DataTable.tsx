@@ -5,7 +5,7 @@ import {
   type ColumnDef, type SortingState, type VisibilityState,
 } from "@tanstack/react-table";
 import { ArrowDown, ArrowUp, Columns3, Download } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -86,12 +86,13 @@ export function DataTable<T>({ rows, cols, name, toolbar, onRowClick, rowKey, ma
                   const align = (h.column.columnDef.meta as { align?: string } | undefined)?.align;
                   const dir = h.column.getIsSorted();
                   return (
-                    <TableHead key={h.id} className={cn("h-7 cursor-pointer px-2 text-2xs font-medium whitespace-nowrap text-muted-foreground select-none", align === "right" && "text-right")}
-                      onClick={h.column.getToggleSortingHandler()} data-sort={dir || undefined}>
-                      <span className="inline-flex items-center gap-0.5">
+                    <TableHead key={h.id} className={cn("h-7 px-2 text-2xs font-medium whitespace-nowrap text-muted-foreground select-none", align === "right" && "text-right")}
+                      data-sort={dir || undefined} aria-sort={dir === "asc" ? "ascending" : dir === "desc" ? "descending" : "none"}>
+                      <button type="button" onClick={h.column.getToggleSortingHandler()}
+                        className={cn("inline-flex cursor-pointer items-center gap-0.5 rounded-sm hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none", align === "right" && "flex-row-reverse")}>
                         {flexRender(h.column.columnDef.header, h.getContext())}
                         {dir === "asc" ? <ArrowUp className="size-3" /> : dir === "desc" ? <ArrowDown className="size-3" /> : null}
-                      </span>
+                      </button>
                     </TableHead>
                   );
                 })}
@@ -102,7 +103,17 @@ export function DataTable<T>({ rows, cols, name, toolbar, onRowClick, rowKey, ma
             {shown.length === 0 ? (
               <TableRow><TableCell colSpan={cols.length} className="py-6 text-center text-muted-foreground">{empty ?? "No rows"}</TableCell></TableRow>
             ) : shown.map((r, i) => (
-              <TableRow key={rowKey ? rowKey(r.original, i) : r.id} className={cn(onRowClick && "cursor-pointer")} onClick={() => onRowClick?.(r.original)}>
+              <TableRow key={rowKey ? rowKey(r.original, i) : r.id}
+                className={cn(onRowClick && "cursor-pointer focus-visible:bg-accent focus-visible:outline-none")}
+                onClick={() => onRowClick?.(r.original)}
+                {...(onRowClick && {
+                  tabIndex: 0,
+                  onKeyDown: (e: KeyboardEvent<HTMLTableRowElement>) => {
+                    if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+                    e.preventDefault();
+                    onRowClick(r.original);
+                  },
+                })}>
                 {r.getVisibleCells().map((cell) => {
                   const align = (cell.column.columnDef.meta as { align?: string } | undefined)?.align;
                   return (

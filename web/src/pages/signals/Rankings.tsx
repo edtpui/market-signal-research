@@ -11,7 +11,7 @@ import { Empty, ErrorState, Loading, PageHeader, Panel } from "@/components/comm
 import { Input, Switch } from "@/components/ui/primitives";
 import * as fmt from "@/lib/format";
 import { Link, navigate } from "@/lib/router";
-import { DirectionBadge, ScopeBadge, SubNav, VERDICT_COLOR, VerdictBadge, ci, pct, pval } from "@/pages/signals/common";
+import { DirectionBadge, ScopeBadge, VERDICT_COLOR, VerdictBadge, ci, pct, pval } from "@/pages/signals/common";
 
 const ORDER: Record<Verdict, number> = { supported: 0, significant_negligible: 1, not_significant: 2, reversed: 3, insufficient_sample: 4 };
 
@@ -67,8 +67,7 @@ export function Rankings() {
 
   return (
     <div className="space-y-3">
-      <PageHeader title="Signal Rankings" sub="Ranked by verdict (statistical AND economic significance), then BH q, then annualized net excess. A statistically significant but economically negligible signal ranks below a supported one and says so." />
-      <SubNav />
+      <PageHeader title="Signal rankings" sub="Ranked by verdict (statistical AND economic significance), then BH q, then annualized net excess. A statistically significant but economically negligible signal ranks below a supported one and says so." />
       <Panel title="Filters">
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4 lg:grid-cols-8">
           <Field label="Partition"><ChoiceSelect value={partition} onChange={setPartition} aria-label="partition" options={["all", "train", "validation", "test", "combined", "full"].map((p) => ({ value: p, label: p }))} /></Field>

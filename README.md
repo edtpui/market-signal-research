@@ -1,12 +1,12 @@
 # Market Signal Research
 
 _Formerly "Strategy Lab" (renamed 2026-11-04). The display name changed; the Python package `strategy_lab`, this folder
-(`projects/strategy_lab`), the `sl-` book ids and the `ledger_strategy_lab` key keep their names, because the prepared
+(`strategy_lab`), the `sl-` book ids and the `ledger_strategy_lab` key keep their names, because the prepared
 ptrade bundle, its operator steps and the write-once imported strategy modules reference them._
 
 Historical backtesting and forward paper testing on one engine. Built in the ptrade web terminal's design (React,
-Tailwind, shadcn/ui, lightweight-charts) over a FastAPI backend. Dev-only project in ClaudeWorkspace: there is no
-broker, no live order and no access to HOLDOUT data. The paper-trading system in `C:\AI\QwenWorkspace\paper_trading`
+Tailwind, shadcn/ui, lightweight-charts) over a FastAPI backend. Dev-only project in Lab: there is no
+broker, no live order and no access to HOLDOUT data. The paper-trading system in `C:\AI\Workspace\trading\paper_trading`
 remains the forward execution authority; Market Signal Research exports to it and reads from it.
 
 - Architecture and the audit behind it: `docs/ARCHITECTURE.md`
@@ -18,11 +18,11 @@ remains the forward execution authority; Market Signal Research exports to it an
   `docs/ENTRY_EXIT_RESEARCH.md`
 
 ## Run
-Interpreter: `../paper_trading/.venv` (Python 3.14.7, numpy/pandas/duckdb/fastapi/pydantic/uvicorn already
+Interpreter: `../.venv-research` (Python 3.14.7, numpy/pandas/duckdb/fastapi/pydantic/uvicorn already
 installed). Nothing is installed globally.
 
 ```
-bash scripts/run_tests.sh                       # 224 Python tests (synthetic fixtures; 3 read the workspace data read-only)
+bash scripts/run_tests.sh                       # 239 Python tests (synthetic fixtures; 3 read the workspace data read-only)
 cd web && npx vitest run && npx tsc -b && npx vite build   # UI tests, typecheck, build into web/dist
 bash scripts/sl.sh serve --port 8070            # API + UI at http://127.0.0.1:8070
 bash scripts/sl.sh ingest us_core               # cache a dataset (versioned Parquet snapshot)
@@ -34,17 +34,35 @@ bash scripts/sl.sh check-contract               # ptrade contract drift (read-on
 ```
 Without bash: `<python> scripts/serve.py serve --port 8070`.
 
+### Container (the running instance since 2026-11-16)
+```
+docker compose up -d                            # API + UI at http://<host ip>:8070 (container market-signal-research; no auth)
+docker compose restart                          # pick up host changes to src/, config/ or web/dist
+docker compose exec app python -m strategy_lab ingest us_core    # any CLI command, against the container's state
+docker compose build                            # only after changing docker/Dockerfile
+```
+The image (`docker/Dockerfile`, Python 3.14 on Linux, the dependency versions of `../.venv-research`) holds no
+project code: this folder and `../data` are mounted read-only. `var/` is the named volume
+`market-signal-research-var`, seeded from the host's `var/` on 2026-11-16 and owned by the container's non-root
+user (uid 1000). The host `var/` is a frozen copy from that date: run new work in the container, not with
+`sl.sh serve` on the host, or the two catalogs diverge. Tests against the image, with no state volume:
+`docker run --rm -v <this folder>:/workspace/strategy_lab:ro -v <../data>:/workspace/data:ro
+market-signal-research:0.1.0 python -m pytest tests -q`.
+
 ## Layout
 ```
 config/settings.toml      data policy, datasets, universes, storage, forward host
 src/strategy_lab/         core (types, strategy API, market view) · engine (broker, portfolio, runner)
                           data (policy, providers, store) · analytics · experiments · strategies · paper · api
+                          catalog.py: what the three experiment stores share (catalog.db, recovery, saved configs)
 strategies_user/          custom strategies, discovered at startup
 src/strategy_lab/signals/  signal catalog (217 signals, 33 families), causal indicator cache, combinations
 src/strategy_lab/research/ event-study engine, matched-random / random-date / benchmark controls, statistics, store
 src/strategy_lab/entryexit/ exit library (57 components), exit plans, trade replay, pairing engine, store, imports
-web/                      the UI (10 sections: Overview, Strategy Library, Signal Research, Entry-Exit Lab,
-                          Backtesting, Forward Testing, Performance Analytics, Market Data, Experiment History, Settings)
+web/                      the UI (6 sections: Overview; Experiments: all experiments, new backtest / signal study /
+                          entry-exit study, library of strategies, signals and exits; Results: compare runs, signal
+                          rankings, entry-exit leaderboards, research ledgers, and every result page; Forward
+                          testing; Market data; Settings). Old page paths still open their new place.
 var/                      generated, gitignored: cache/ (datasets), experiments/ (read-only run dirs), catalog.db,
                           forward/ (deployments, mock host, export bundles), signal_research/ (read-only experiment
                           dirs), signal_imports/ (generated strategy modules of imported signals), entry_exit/

@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from conftest import wait_done, write_settings
+from conftest import check_live_owner_is_left_alone, wait_done, write_settings
 from strategy_lab.core.strategy import Param
 from strategy_lab.research import engine as E
 from strategy_lab.research import stats as st
@@ -415,6 +415,11 @@ def test_cancellation_marks_the_experiment(rlab):
     assert out["status"] == "cancelled" and R.get(eid)["status"] == "cancelled"
 
 
+def test_recovery_leaves_signal_studies_of_a_live_process_alone(rlab):
+    eid = rlab.research.create(cfg_(signals=[SignalSpec(id="rsi14_below_30")], horizons=[5]))
+    check_live_owner_is_left_alone(rlab.research, eid)
+
+
 def test_test_partition_ledger_locks_the_first_result(rlab):
     R = rlab.research
     c = cfg_(signals=[SignalSpec(id="rsi14_below_30")], horizons=[5], evaluate_test=True)
@@ -431,6 +436,10 @@ def test_test_partition_ledger_locks_the_first_result(rlab):
         con.execute("UPDATE signal_test_ledger SET first_use=1")
     with pytest.raises(sqlite3.DatabaseError):
         con.execute("DELETE FROM signal_locked_results")
+    for sql in ("UPDATE signal_data_usage SET n_tests = 0", "DELETE FROM signal_data_usage"):
+        with pytest.raises(sqlite3.DatabaseError, match="append-only"):
+            con.execute(sql)
+    assert con.execute("SELECT COUNT(*) FROM signal_data_usage").fetchone()[0] > 0
     con.close()
     u = R.usage()
     test_rows = [p for p in u["partitions"] if p["role"] == "test"]

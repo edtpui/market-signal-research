@@ -1,15 +1,15 @@
 # Market Signal Research: audit and architecture
 
-_2026-11-03. Dev-only project in `C:\AI\ClaudeWorkspace\projects\strategy_lab` (git, branch `claude-dev`, no remote).
-Nothing here is operational. The operational source of truth is `C:\AI\QwenWorkspace`, and it was only read for this
+_2026-11-03. Dev-only project in `C:\AI\Workspace\trading\strategy_lab` (git, branch `claude-dev`, no remote).
+Nothing here is operational. The operational source of truth is `C:\AI\Workspace`, and it was only read for this
 document._
 
 ## 1. Audit
 
 ### 1.1 Which UI is "the existing UI"
-`projects/flag_db_builder` (and the operational `QwenWorkspace/flag_db_builder`) has **no UI**: there are no HTML,
+`flag_db_builder` (and the operational `Ops/flag_db_builder`) has **no UI**: there are no HTML,
 JS, TS or CSS files and no web framework. The UI that presents the flag research is the paper-trading **web
-terminal**, `QwenWorkspace/paper_trading/web` (commit `5d55adf`, HEAD `792758b`). It replaced the Dash console.
+terminal**, `Ops/paper_trading/web` (commit `5d55adf`, HEAD `792758b`). It replaced the Dash console.
 **Assumption:** that terminal is the UI to reuse. The stack:
 
 | Aspect | Web terminal (`paper_trading/web`) |
@@ -32,10 +32,10 @@ every page, the API client and hooks, book/series/evidence models, live marks, t
 does not hold the toolchain. Building the UI therefore needs one `npm ci`; see section 6.
 
 ### 1.2 Paper-trading system
-Canonical: `QwenWorkspace/paper_trading`, git HEAD `792758b` ("One book registry for the engine and the terminal"),
+Canonical: `Ops/paper_trading`, git HEAD `792758b` ("One book registry for the engine and the terminal"),
 two uncommitted edits (`README.md`, `deploy/compose.yml`). Live in forward paper trading since FT24a with 8 books.
-`QwenWorkspace/paper_trading_web` is at the same HEAD; `QwenWorkspace/paper_trading_dev` is older (`571bd97`).
-None of the ClaudeWorkspace copies match: `projects/paper_trading` is the FT8 snapshot, `projects/paper_trading_v3*`
+`Ops/paper_trading_web` was at the same HEAD (retired 2026-11-16, archived under `scratch/archive/`); `Ops/paper_trading_dev` is older (`571bd97`).
+None of the Lab copies match: `paper_trading` is the FT8 snapshot, `paper_trading_v3*`
 are FT11r. Only source files, docs and config were read; `data/`, ledgers and `logs/` were not opened.
 
 | Concern | ptrade at `792758b` |
@@ -53,7 +53,7 @@ are FT11r. Only source files, docs and config were read; `data/`, ledgers and `l
 | Strategy config | `books.toml` entry (`id, family, unit, ledger, model, scores, rule, params, protocol, ...`); rule params checked against the rule's `ALLOWED` |
 
 ### 1.3 Data available in this workspace
-`C:\AI\ClaudeWorkspace\data` (research downloads, read-only, yfinance 1.7.0): `yf_2018_2025` (512 large caps + SPY),
+`C:\AI\Workspace\trading\data` (research downloads, read-only, yfinance 1.7.0): `yf_2018_2025` (512 large caps + SPY),
 `yf_2018_2025_midsmall`, `yf_2018_2025_other`, `yf_etf_2008_2025` (SPY, IJH, IJR), `yf_macro_2018_2025` (sector
 ETFs, QQQ, IWM, ^VIX, ^TNX, ...), all ending 2025-12-31. Each ticker has `<T>_1d.csv` (adjusted OHLCV) and
 `<T>_1d_raw.csv` (Close, Volume with `auto_adjust=False`, which yfinance **split-adjusts but does not
@@ -84,7 +84,7 @@ documented basket plug-in interface. No LEAN.**
   persists it append-only, detects restatements, owns registration and pause/resume, and serves the results.
   Market Signal Research never writes to a ptrade ledger, and it reads results only through API v1.
 
-The earlier platform plan (`QwenWorkspace/plans/2026-10-26_platform_plan.md`) rejected a separate engine because two
+The earlier platform plan (`Ops/plans/2026-10-26_platform_plan.md`) rejected a separate engine because two
 engines drift. This design keeps that principle: one engine per strategy family. The plug-in carries Market Signal Research's
 engine as a sha256-pinned copy, as `models/fdb_v5fam` + `ptrade/basket_pin.py` do for the research code, and its
 config hash includes the pin. A change to the engine therefore becomes a new ptrade `model_id`.
@@ -92,7 +92,7 @@ config hash includes the pin. A change to the engine therefore becomes a new ptr
 ## 3. Components
 
 ```
-web/ (React terminal design)  Overview · Strategies · Backtesting · Forward · Analytics · Market Data · Experiments · Settings
+web/ (React terminal design)  Overview · Experiments (list, 3 builders, library) · Results · Forward testing · Market data · Settings
         │ /api/v1 (FastAPI, 127.0.0.1)
 src/strategy_lab/
   core/        types (OrderIntent, TargetWeights, Order, Fill, OrderEvent), Strategy ABC, StrategyContext, MarketView
@@ -102,6 +102,9 @@ src/strategy_lab/
                runner (the session loop shared by every mode), backtest entry point
   analytics/   metrics (one implementation for backtest and forward), round trips, monthly/rolling tables
   experiments/ ExperimentConfig, immutable run store + SQLite catalog, reproduction check, job executor
+  catalog.py   shared by the backtest, signal and entry-exit stores: catalog connection, experiment rows,
+               owner-aware recovery, saved configurations, read-only finish, provenance hashes. Outside
+               the hashed source dirs on purpose: it computes no results
   strategies/  built-in library + user strategy discovery (strategies_user/)
   paper/       ptrade contract mirror, PortfolioRule/ScoreProducer plug-in, export bundle, API v1 client,
                gateway, deployments + sync, and a mock ptrade host for dev (API v1-shaped)

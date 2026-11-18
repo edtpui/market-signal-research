@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/primitives";
 import { navigate } from "@/lib/router";
 import { cn } from "@/lib/utils";
-import { DirectionBadge, ScopeBadge, SubNav } from "@/pages/signals/common";
+import { DirectionBadge, ScopeBadge } from "@/pages/signals/common";
 
 export function SignalLibrary() {
   const cat = useCatalog();
@@ -44,12 +44,11 @@ export function SignalLibrary() {
 
   return (
     <div className="space-y-3">
-      <PageHeader title="Signal Research Lab" sub="Independently testable signal definitions. Each has an id, family, version, typed parameters, a trigger definition, its bar fields and its history requirement."
+      <PageHeader title="Signals" sub="Independently testable signal definitions. Each has an id, family, version, typed parameters, a trigger definition, its bar fields and its history requirement."
         actions={<>
           <Button size="sm" variant="outline" disabled={!family} onClick={() => navigate(`/signals/new?family=${family}`)} data-action="test-family"><FlaskConical className="size-3.5" />Test family</Button>
           <Button size="sm" disabled={!selected.length} onClick={() => navigate(`/signals/new?signals=${selected.join(",")}`)} data-action="test-selected"><FlaskConical className="size-3.5" />Test {selected.length || ""} selected</Button>
         </>} />
-      <SubNav />
       {cat.error && <ErrorState error={cat.error} retry={cat.refetch} />}
       {cat.isLoading ? <Loading rows={10} /> : (
         <div className="grid gap-3 lg:grid-cols-[240px_1fr]">
@@ -68,7 +67,7 @@ export function SignalLibrary() {
           </Panel>
           <Panel title={family ? famName(family) : "All signals"} info={family ? fams.find((f) => f.id === family)?.description : undefined}>
             {family && <p className="mb-2 text-xs text-muted-foreground">{fams.find((f) => f.id === family)?.description}</p>}
-            <DataTable name="signals" rows={rows} cols={cols} maxHeight={640} onRowClick={(s) => navigate(`/signals/library/${s.id}`)} rowKey={(s) => s.id}
+            <DataTable name="signals" rows={rows} cols={cols} maxHeight={640} onRowClick={(s) => navigate(`/library/signals/${encodeURIComponent(s.id)}`)} rowKey={(s) => s.id}
               toolbar={<>
                 <ChoiceSelect className="h-7 w-32" value={direction} onChange={setDirection} aria-label="direction filter"
                   options={[{ value: "all", label: "Both directions" }, { value: "bullish", label: "Bullish" }, { value: "bearish", label: "Bearish" }]} />

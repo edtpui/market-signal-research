@@ -104,3 +104,21 @@ def wait_done(lab, run_id: str, timeout: float = 120.0) -> dict:
             return m
         time.sleep(0.05)
     raise TimeoutError(run_id)
+
+
+def check_live_owner_is_left_alone(store, eid: str) -> None:
+    """recover_interrupted (run at server start) leaves an experiment alone while the process its owner file names is
+    alive, and marks it failed once that process is gone (shared by the three stores, strategy_lab.catalog)."""
+    import json
+    import platform
+    import subprocess
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        (store.path(eid) / "owner.json").write_text(json.dumps(dict(pid=child.pid, host=platform.node())))
+        store._set(eid, status="running")
+        assert store.recover_interrupted() == 0 and store.get(eid)["status"] == "running"
+    finally:
+        child.kill()
+        child.wait()
+    assert store.recover_interrupted() == 1 and store.get(eid)["status"] == "failed"
+    assert "interrupted" in store.get(eid)["error"]

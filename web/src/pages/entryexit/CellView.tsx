@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import type { Row } from "@/api/client";
 import * as fmt from "@/lib/format";
 import { navigate } from "@/lib/router";
-import { EESubNav, pctc, qv } from "@/pages/entryexit/common";
+import { pctc, qv } from "@/pages/entryexit/common";
 import { VerdictBadge } from "@/pages/signals/common";
 
 const P = (v: number | null | undefined, d = 2) => fmt.pct(v, d);
@@ -97,8 +97,8 @@ export function CellView({ id, cell }: { id: string; cell: string }) {
     return [...g.entries()].filter(([, v]) => v.n >= 5).sort((a, b) => a[0] - b[0]).map(([k, v]) => [k, v.sum / v.n] as [number, number]);
   }, [trades.data]);
 
-  if (c.isLoading || exp.isLoading) return <div className="space-y-3"><PageHeader title={cell} /><EESubNav /><Loading rows={10} /></div>;
-  if (c.error || !c.data) return <div className="space-y-3"><PageHeader title={cell} /><EESubNav /><ErrorState error={c.error ?? "not found"} /></div>;
+  if (c.isLoading || exp.isLoading) return <div className="space-y-3"><PageHeader title={cell} /><Loading rows={10} /></div>;
+  if (c.error || !c.data) return <div className="space-y-3"><PageHeader title={cell} /><ErrorState error={c.error ?? "not found"} /></div>;
   const d = c.data;
   const cols: Col<Row>[] = [
     { id: "signal_date", header: "Signal", value: (r) => r.signal_date }, { id: "symbol", header: "Symbol", value: (r) => r.symbol },
@@ -123,10 +123,9 @@ export function CellView({ id, cell }: { id: string; cell: string }) {
         actions={<>
           <Field label="Partition"><ChoiceSelect value={part} onChange={setPartition} className="h-8 w-36 text-xs" options={parts.map((x) => ({ value: x, label: `${x} (${d.partitions[x].role})` }))} aria-label="partition" /></Field>
           <Button size="sm" disabled={imp.isPending} onClick={() => imp.mutate({ experiment_id: id, cell }, {
-            onSuccess: (r) => { toast.success(`${r.created ? "imported" : "already imported"}: ${r.strategy_id}`); navigate(`/strategies/${r.strategy_id}`); },
-            onError: (e) => toast.error(String(e)) })} data-action="import"><Library className="size-3.5" />Import to Strategy Library</Button>
+            onSuccess: (r) => { toast.success(`${r.created ? "imported" : "already imported"}: ${r.strategy_id}`); navigate(`/library/strategies/${encodeURIComponent(r.strategy_id)}`); },
+            onError: (e) => toast.error(String(e)) })} data-action="import"><Library className="size-3.5" />Import as a strategy</Button>
         </>} />
-      <EESubNav />
       {s && <TradeStats s={s} timingQ={c.data?.timing_tests?.find((t) => t.partition === part)?.q} />}
       <div className="grid gap-3 xl:grid-cols-[1fr_380px]">
         <div className="space-y-3">

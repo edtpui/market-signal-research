@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/primitives";
 import * as fmt from "@/lib/format";
 import { Link, navigate } from "@/lib/router";
-import { DirectionBadge, ScopeBadge, SubNav, VERDICT_COLOR, VerdictBadge, ci, pct, pval } from "@/pages/signals/common";
+import { DirectionBadge, ScopeBadge, VERDICT_COLOR, VerdictBadge, ci, pct, pval } from "@/pages/signals/common";
 
 const C = { signal: "#3987e5", matched: "#d95926", rd: "#199e70", bench: "#9b9a94" };
 
@@ -73,11 +73,11 @@ export function SignalResultPage({ id, signalKey }: { id: string; signalKey: str
     return cols;
   }, [h, bname]);
 
-  if (res.isLoading || exp.isLoading) return <div className="space-y-3"><PageHeader title={signalKey} /><SubNav /><Loading rows={10} /></div>;
-  if (res.error || !res.data) return <div className="space-y-3"><PageHeader title={signalKey} /><SubNav /><ErrorState error={res.error ?? "not found"} /></div>;
+  if (res.isLoading || exp.isLoading) return <div className="space-y-3"><PageHeader title={signalKey} /><Loading rows={10} /></div>;
+  if (res.error || !res.data) return <div className="space-y-3"><PageHeader title={signalKey} /><ErrorState error={res.error ?? "not found"} /></div>;
   if (!summ) {
     return (
-      <div className="space-y-3"><PageHeader title={signalKey} sub={`status ${res.data.run.status}`} /><SubNav />
+      <div className="space-y-3"><PageHeader title={signalKey} sub={`status ${res.data.run.status}`} />
         {res.data.error ? <pre className="num overflow-auto rounded-md border border-neg/40 bg-neg/5 p-2 text-[11px]">{res.data.error}</pre> : <Empty title="No results for this signal" />}
       </div>
     );
@@ -86,7 +86,7 @@ export function SignalResultPage({ id, signalKey }: { id: string; signalKey: str
   const test = res.data.tests.find((t) => t.partition === part && t.horizon === h);
   const cmp = hs ? (tab === "matched" ? hs.matched : hs.random_date) : null;
   const doImport = () => imp.mutate({ experiment_id: id, signal_key: signalKey, defaults: hold ? { hold_bars: Number(hold) } : {} }, {
-    onSuccess: (r) => { toast.success(r.created ? `Imported as ${r.strategy_id}` : `Already imported as ${r.strategy_id}`); navigate(`/strategies/${r.strategy_id}`); },
+    onSuccess: (r) => { toast.success(r.created ? `Imported as ${r.strategy_id}` : `Already imported as ${r.strategy_id}`); navigate(`/library/strategies/${encodeURIComponent(r.strategy_id)}`); },
     onError: (e) => toast.error(String(e)),
   });
 
@@ -99,12 +99,11 @@ export function SignalResultPage({ id, signalKey }: { id: string; signalKey: str
   return (
     <div className="space-y-3" data-signal-result={signalKey}>
       <PageHeader title={<span className="flex items-center gap-2">{s.name} <DirectionBadge d={dir} /> <ScopeBadge s={s.scope} /></span>}
-        sub={<span className="num">{signalKey} · <Link className="text-primary hover:underline" to={`/signals/experiments/${id}`}>{id}</Link>{s.kind === "signal" && <> · <Link className="text-primary hover:underline" to={`/signals/library/${s.id}`}>definition <ExternalLink className="inline size-3" /></Link></>}</span>}
+        sub={<span className="num">{signalKey} · <Link className="text-primary hover:underline" to={`/signals/experiments/${id}`}>{id}</Link>{s.kind === "signal" && <> · <Link className="text-primary hover:underline" to={`/library/signals/${encodeURIComponent(s.id)}`}>definition <ExternalLink className="inline size-3" /></Link></>}</span>}
         actions={<div className="flex items-center gap-2">
           <Input className="num h-8 w-28 text-xs" placeholder={`hold ${cfg?.primary_horizon ?? h}`} value={hold} onChange={(e) => setHold(e.target.value)} aria-label="holding sessions for the strategy" title="Holding period of the imported strategy (default: the primary horizon)" />
-          <Button size="sm" onClick={doImport} disabled={imp.isPending} data-action="import"><BookPlus className="size-3.5" />Import to Strategy Library</Button>
+          <Button size="sm" onClick={doImport} disabled={imp.isPending} data-action="import"><BookPlus className="size-3.5" />Import as a strategy</Button>
         </div>} />
-      <SubNav />
       <div className="rounded-md border bg-surface-2/60 px-2.5 py-1.5 text-xs"><span className="text-muted-foreground">Trigger: </span>{s.trigger}{Object.keys(s.params).length > 0 && s.kind === "signal" && <span className="num text-muted-foreground"> · {Object.entries(s.params).map(([k, v]) => `${k}=${v}`).join(", ")}</span>}</div>
       <div className="grid grid-cols-2 gap-1.5 md:grid-cols-4 lg:grid-cols-8">
         <Stat label="Triggers" value={fmt.int(summ.counts.triggers)} sub={`${fmt.int(summ.counts.ineligible_triggers)} ineligible`} />

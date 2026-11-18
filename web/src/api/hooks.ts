@@ -5,7 +5,6 @@ import {
   api, qs, type Compare, type CoverageRow, type DatasetDetail, type DatasetItem, type DeploymentListItem,
   type DeploymentSpec, type EquityRow, type ExperimentConfig, type Health, type HostState, type Reconciliation,
   type Row, type RunDetail, type RunRow, type Settings, type Snapshot, type StrategyDetail, type StrategyInfo,
-  type Validation,
 } from "@/api/client";
 
 export const useHealth = () => useQuery({ queryKey: ["health"], queryFn: () => api.get<Health>("/health"), refetchInterval: 30_000 });
@@ -135,7 +134,6 @@ export function useDeploy() {
     onSuccess: () => invalidateForward(qc),
   });
 }
-export const useValidateDeploy = () => useMutation({ mutationFn: (spec: DeploymentSpec) => api.post<Validation>("/forward/validate", spec) });
 export function useAdvance() {
   const qc = useQueryClient();
   return useMutation({

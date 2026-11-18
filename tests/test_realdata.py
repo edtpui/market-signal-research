@@ -11,7 +11,7 @@ from strategy_lab.data.policy import DataPolicy
 from strategy_lab.data.providers import DatasetSpec
 from strategy_lab.data.store import DataStore
 
-DATA = Path(__file__).resolve().parents[3] / "data" / "yf_etf_2008_2025"
+DATA = Path(__file__).resolve().parents[2] / "data" / "yf_etf_2008_2025"
 pytestmark = [pytest.mark.realdata, pytest.mark.skipif(not DATA.is_dir(), reason="workspace data not present")]
 
 

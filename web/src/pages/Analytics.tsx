@@ -39,7 +39,7 @@ export function AnalyticsPage() {
   }, [cmp.data]);
   return (
     <div className="space-y-3">
-      <PageHeader title="Performance Analytics" sub="Select finished runs to compare them on their common sessions. Metric definitions match backtests and forward books." />
+      <PageHeader title="Compare runs" sub="Select finished runs to compare them on their common sessions. Metric definitions match backtests and forward books." />
       <div className="grid gap-3 xl:grid-cols-[320px_1fr]">
         <Panel title={`Runs (${ids.length} selected)`} bodyClass="p-0">
           {runs.isLoading ? <div className="p-3"><Loading rows={6} /></div> : done.length === 0 ? <div className="p-3"><Empty title="No finished runs" /></div> : (

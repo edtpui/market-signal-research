@@ -7,7 +7,7 @@ import stat
 
 import pytest
 
-from conftest import wait_done
+from conftest import check_live_owner_is_left_alone, wait_done
 from strategy_lab.data.policy import PolicyError
 from strategy_lab.experiments.config import ExperimentConfig
 from strategy_lab.experiments.store import ARTIFACTS, RunExists
@@ -82,6 +82,21 @@ def test_interrupted_runs_are_marked_failed(lab):
     run_id = lab.experiments.create(ExperimentConfig(**CFG))
     assert lab.experiments.recover_interrupted() == 1
     assert "interrupted" in lab.experiments.get(run_id)["error"]
+
+
+def test_recovery_leaves_runs_of_a_live_process_alone(lab):
+    """Before 2026-11-06 only entry-exit studies had owner files: starting the server marked a backtest that a script
+    was executing as interrupted."""
+    run_id = lab.experiments.create(ExperimentConfig(**CFG))
+    assert json.loads((lab.experiments.path(run_id) / "owner.json").read_text())["pid"] == os.getpid()
+    check_live_owner_is_left_alone(lab.experiments, run_id)
+
+
+def test_store_paths_stay_inside_their_directories(lab):
+    for store in (lab.experiments, lab.research, lab.entry_exit):
+        for bad in ("..", "../experiments", "nope"):
+            with pytest.raises(KeyError):
+                store.path(bad)
 
 
 def test_config_hash_ignores_labels():

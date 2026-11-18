@@ -20,7 +20,7 @@ import { Switch, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/u
 import * as fmt from "@/lib/format";
 import { navigate } from "@/lib/router";
 import { cn } from "@/lib/utils";
-import { EESubNav, cellColor, eeFailure, eeProgress, fmtMetric, pctc, qv } from "@/pages/entryexit/common";
+import { cellColor, eeFailure, eeProgress, fmtMetric, pctc, qv } from "@/pages/entryexit/common";
 import { TimingPanel } from "@/pages/entryexit/TimingPanel";
 import { VerdictBadge } from "@/pages/signals/common";
 
@@ -94,8 +94,8 @@ export function ExperimentView({ id }: { id: string }) {
   const entryNames = useMemo(() => (cfg?.resolved_entries ?? []).map((e) => e.name), [cfg]);
   const exitNames = useMemo(() => (cfg?.resolved_exits ?? []).map((e) => e.name), [cfg]);
 
-  if (exp.isLoading) return <div className="space-y-3"><PageHeader title={id} /><EESubNav /><Loading rows={10} /></div>;
-  if (exp.error || !exp.data || !meta || !cfg) return <div className="space-y-3"><PageHeader title={id} /><EESubNav /><ErrorState error={exp.error ?? "not found"} /></div>;
+  if (exp.isLoading) return <div className="space-y-3"><PageHeader title={id} /><Loading rows={10} /></div>;
+  if (exp.error || !exp.data || !meta || !cfg) return <div className="space-y-3"><PageHeader title={id} /><ErrorState error={exp.error ?? "not found"} /></div>;
   const running = meta.status === "queued" || meta.status === "running";
   const fams = { entry: [...new Set((cfg.resolved_entries ?? []).map((e) => e.family))], exit: [...new Set((cfg.resolved_exits ?? []).map((e) => e.family))] };
   const base = comp.data?.baseline.index;
@@ -107,7 +107,6 @@ export function ExperimentView({ id }: { id: string }) {
           {meta.status === "done" && <Button size="sm" variant="outline" disabled={repro.isPending} onClick={() => repro.mutate(id, { onSuccess: (r) => toast.success(`reproduction ${r.reproduction}: ${r.identical}/${r.cells} cells identical`), onError: (e) => toast.error(String(e)) })}><Repeat className="size-3.5" />Reproduce</Button>}
           <Button size="sm" variant="outline" onClick={() => navigate(`/entry-exit/new?config=`)}>New</Button>
         </>} />
-      <EESubNav />
       <div className="grid grid-cols-2 gap-2 md:grid-cols-6">
         <Stat label="Entries x exits" value={`${meta.n_entries} x ${meta.n_exits}`} sub={`${meta.n_cells} cells per partition`} />
         <Stat label="Stage" value={meta.stage ?? "—"} sub={running ? `${meta.progress_done}/${meta.progress_total}` : meta.summary ? `${meta.summary.seconds}s` : ""} />

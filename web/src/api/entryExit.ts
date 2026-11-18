@@ -190,10 +190,6 @@ export const useTiming = (id?: string, enabled = true) => useQuery({
   queryKey: ["ee-timing", id], enabled: !!id && enabled, staleTime: Infinity,
   queryFn: () => api.get<Partial<Timing>>(`/entry-exit/experiments/${enc(id!)}/timing`),
 });
-export const useTests = (id?: string, enabled = true) => useQuery({
-  queryKey: ["ee-tests", id], enabled: !!id && enabled, staleTime: Infinity,
-  queryFn: () => api.get<{ tests: TestRow[]; m_tests: Record<string, number>; n_cells: number }>(`/entry-exit/experiments/${enc(id!)}/tests`),
-});
 export const useLeaderboard = (f: { board: string; objective: string; role: string; experiment_id?: string; min_trades?: number; max_drawdown?: number | null }) => useQuery({
   queryKey: ["ee-board", f], queryFn: () => api.get<BoardRow[]>(`/entry-exit/leaderboards${qs(f)}`),
 });
@@ -201,6 +197,9 @@ export const useEEConfigs = () => useQuery({
   queryKey: ["ee-configs"], queryFn: () => api.get<{ config_id: string; name: string; created_at_utc: string; config: EEConfig }[]>("/entry-exit/configs"),
 });
 export const useEEImports = () => useQuery({ queryKey: ["ee-imports"], queryFn: () => api.get<{ strategy_id: string; version: string; experiment_id: string; cell: string; created_at_utc: string }[]>("/entry-exit/imports") });
+/** One row per (experiment, partition) from the append-only ee_data_usage ledger. */
+export interface EEUsageRow { experiment_id: string; dataset: string; dataset_version: string | null; partition: string; role: string; start: string | null; end: string | null; n_cells: number; at_utc: string }
+export const useEEUsage = () => useQuery({ queryKey: ["ee-usage"], queryFn: () => api.get<EEUsageRow[]>("/entry-exit/usage") });
 
 export const useEEValidate = () => useMutation({ mutationFn: (cfg: EEConfig) => api.post<ValidateResult>("/entry-exit/validate", cfg) });
 export function useEELaunch() {
@@ -228,6 +227,13 @@ export function useEESaveConfig() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (b: { name: string; config: EEConfig }) => api.post<{ config_id: string }>("/entry-exit/configs", b),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["ee-configs"] }),
+  });
+}
+export function useEEDeleteConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del(`/entry-exit/configs/${enc(id)}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ee-configs"] }),
   });
 }

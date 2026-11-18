@@ -65,4 +65,4 @@ rows <= t. Backtests verify it (`engine.runner.verify_precompute` recomputes on 
   Never fit on data past the current session, and never precompute features over the whole window.
 
 **Where to put it:** `strategies_user/*.py` (see `inverse_vol.py`). It is discovered at startup; an import error is
-shown in the Strategy Library and on the Overview page.
+shown under Experiments > Strategies and on the Overview page.

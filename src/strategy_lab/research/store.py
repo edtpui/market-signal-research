@@ -23,23 +23,20 @@ import datetime as dt
 import hashlib
 import io
 import json
-import os
-import sqlite3
-import stat
 import threading
 import time
 import traceback
 import uuid
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import duckdb
 import pandas as pd
 
-import strategy_lab
+from strategy_lab.catalog import (QueuedStore, git_state, make_readonly, now_utc, package_versions, sha256_file,
+                                  source_sha256, write_owner)
 from strategy_lab.core.strategy import canonical_hash
 from strategy_lab.data.policy import period_labels
-from strategy_lab.experiments.store import _git_state, _versions, sha256_file
 from strategy_lab.research.config import SignalExperimentConfig
 from strategy_lab.research.engine import (Cancelled, ResearchError, expand_signals, finalize_tests, prepare,
                                           resolution_note, resolve_config, run_signal)
@@ -91,21 +88,13 @@ CREATE TRIGGER IF NOT EXISTS signal_locked_no_delete BEFORE DELETE ON signal_loc
   BEGIN SELECT RAISE(ABORT, 'locked results are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS signal_usage_no_update BEFORE UPDATE ON signal_data_usage
   BEGIN SELECT RAISE(ABORT, 'signal_data_usage is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS signal_usage_no_delete BEFORE DELETE ON signal_data_usage
+  BEGIN SELECT RAISE(ABORT, 'signal_data_usage is append-only'); END;
 """
 
 
-def now_utc() -> str:
-    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def code_sha256() -> str:
-    root = Path(strategy_lab.__file__).parent
-    h = hashlib.sha256()
-    for d in CODE_DIRS:
-        for f in sorted((root / d).rglob("*.py")):
-            h.update(f.relative_to(root).as_posix().encode())
-            h.update(f.read_bytes())
-    return h.hexdigest()
+    return source_sha256(CODE_DIRS)
 
 
 def _json(obj, path: Path) -> None:
@@ -165,30 +154,14 @@ def content_sha256(summary: dict, events: pd.DataFrame, nulls: pd.DataFrame) -> 
     return h.hexdigest()
 
 
-def _readonly(path: Path) -> None:
-    for p in sorted(path.rglob("*")):
-        if p.is_file():
-            os.chmod(p, stat.S_IREAD | stat.S_IRGRP | stat.S_IROTH)
+class SignalResearchStore(QueuedStore):
+    TABLE, KEY, CONFIGS_TABLE = "signal_experiments", "experiment_id", "signal_saved_configs"
+    CONFIG_MODEL = SignalExperimentConfig
+    LABEL = "signal experiment"
+    JSON_COLS, BOOL_COLS = ("summary", "reproduction", "partitions"), ("evaluate_test",)
 
-
-class SignalResearchStore:
     def __init__(self, root: Path, catalog: Path, lab, workers: int = 1):
-        self.root = Path(root)
-        self.root.mkdir(parents=True, exist_ok=True)
-        self.catalog_path = Path(catalog)
-        self.lab = lab
-        self._lock = threading.Lock()
-        self._cancel: dict[str, threading.Event] = {}
-        self.pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="signal-research")
-        self.futures: dict[str, Future] = {}
-        with self._db() as c:
-            c.executescript(DDL)
-
-    def _db(self) -> sqlite3.Connection:
-        c = sqlite3.connect(self.catalog_path, timeout=30, isolation_level=None)
-        c.row_factory = sqlite3.Row
-        c.execute("PRAGMA journal_mode=WAL")
-        return c
+        super().__init__(root, catalog, lab, DDL, workers, "signal-research")
 
     # -- resolution and creation ------------------------------------------------------------------------------------
     def resolve(self, cfg: SignalExperimentConfig):
@@ -202,6 +175,7 @@ class SignalResearchStore:
         d = self.root / eid
         d.mkdir(parents=True)
         _json(_clean(resolved.model_dump(mode="json")), d / "config.json")
+        write_owner(d)
         parts = [dict(name=p.name, role=p.role, start=p.start.isoformat(), end=p.end.isoformat(),
                       locked=p.role == "test" and not resolved.evaluate_test) for p in resolved.partitions]
         with self._db() as c:
@@ -217,43 +191,6 @@ class SignalResearchStore:
                        ",".join(period_labels(resolved.start, resolved.analysis_end))))
         return eid
 
-    def submit(self, eid: str) -> Future:
-        f = self.pool.submit(self._safe_execute, eid)
-        self.futures[eid] = f
-        return f
-
-    def _safe_execute(self, eid: str):
-        try:
-            return self.execute(eid)
-        except Exception:  # noqa: BLE001 - recorded on the experiment
-            return None
-
-    def cancel(self, eid: str) -> dict:
-        meta = self.get(eid)
-        if meta is None:
-            raise KeyError(f"no signal experiment {eid}")
-        if meta["status"] not in ("queued", "running"):
-            return dict(experiment_id=eid, status=meta["status"], cancelled=False)
-        ev = self._cancel.setdefault(eid, threading.Event())
-        ev.set()
-        if meta["status"] == "queued":
-            f = self.futures.get(eid)
-            if f is not None and f.cancel():
-                self._set(eid, status="cancelled", finished_at_utc=now_utc(), error="cancelled before it started")
-                _readonly(self.root / eid)
-        return dict(experiment_id=eid, status="cancelling", cancelled=True)
-
-    def recover_interrupted(self) -> int:
-        with self._db() as c:
-            return c.execute("UPDATE signal_experiments SET status='failed', finished_at_utc=?, error=? "
-                             "WHERE status IN ('running', 'queued')",
-                             (now_utc(), "interrupted: the process stopped before the experiment finished")).rowcount
-
-    def _set(self, eid: str, **cols) -> None:
-        keys = ", ".join(f"{k}=?" for k in cols)
-        with self._db() as c:
-            c.execute(f"UPDATE signal_experiments SET {keys} WHERE experiment_id=?", (*cols.values(), eid))
-
     # -- execution ----------------------------------------------------------------------------------------------------
     def execute(self, eid: str) -> dict:
         meta = self.get(eid)
@@ -264,6 +201,7 @@ class SignalResearchStore:
         d = self.root / eid
         cfg = self.config(eid)
         cancel = self._cancel.setdefault(eid, threading.Event())
+        write_owner(d)
         self._set(eid, status="running", started_at_utc=now_utc())
         t0 = time.time()
         try:
@@ -303,13 +241,13 @@ class SignalResearchStore:
                            verdicts=_verdict_counts(final, cfg.primary_horizon))
             self._set(eid, status=status, finished_at_utc=now_utc(), summary=json.dumps(summary),
                       error="cancelled by the user" if status == "cancelled" else None)
-            _readonly(d)
+            make_readonly(d)
             return dict(experiment_id=eid, status=status, summary=summary)
         except Exception as e:  # noqa: BLE001 - recorded on the experiment, then re-raised
             (d / "error.txt").write_text(traceback.format_exc(), encoding="utf-8")
             status = "cancelled" if isinstance(e, Cancelled) else "failed"
             self._set(eid, status=status, finished_at_utc=now_utc(), error=f"{type(e).__name__}: {e}"[:2000])
-            _readonly(d)
+            make_readonly(d)
             if status == "cancelled":
                 return dict(experiment_id=eid, status=status)
             raise
@@ -414,7 +352,7 @@ class SignalResearchStore:
                     methodology_hash=cfg.methodology_hash(),
                     label="EXPLORATORY (dev workspace; data <= 2025-12-31)",
                     periods=period_labels(cfg.start, cfg.analysis_end),
-                    code=dict(signals_research_data_sha256=code_sha256(), **_git_state()), versions=_versions(),
+                    code=dict(signals_research_data_sha256=code_sha256(), **git_state()), versions=package_versions(),
                     dataset=dict(id=ds.dataset_id, version=ds.version, provider=ds.meta["provider"],
                                  sources=ds.meta["sources"], ingested_at_utc=ds.meta["ingested_at_utc"],
                                  policy=ds.meta["policy"]),
@@ -424,37 +362,6 @@ class SignalResearchStore:
                     files=files)
 
     # -- reading ---------------------------------------------------------------------------------------------------
-    def get(self, eid: str) -> dict | None:
-        with self._db() as c:
-            r = c.execute("SELECT * FROM signal_experiments WHERE experiment_id=?", (eid,)).fetchone()
-        if r is None:
-            return None
-        d = dict(r)
-        for k in ("summary", "reproduction", "partitions"):
-            d[k] = json.loads(d[k]) if d[k] else None
-        d["periods"] = d["periods"].split(",") if d["periods"] else []
-        d["evaluate_test"] = bool(d["evaluate_test"])
-        return d
-
-    def list(self, limit: int = 500) -> list[dict]:
-        with self._db() as c:
-            ids = [r[0] for r in c.execute("SELECT experiment_id FROM signal_experiments ORDER BY created_at_utc "
-                                           "DESC, experiment_id DESC LIMIT ?", (limit,))]
-        return [self.get(i) for i in ids]
-
-    def path(self, eid: str) -> Path:
-        d = self.root / eid
-        if not (d / "config.json").exists():
-            raise KeyError(f"no signal experiment {eid}")
-        return d
-
-    def config(self, eid: str) -> SignalExperimentConfig:
-        return SignalExperimentConfig.model_validate_json((self.path(eid) / "config.json").read_text(encoding="utf-8"))
-
-    def read_json(self, eid: str, name: str):
-        p = self.path(eid) / name
-        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
-
     def runs(self, eid: str) -> list[dict]:
         with self._db() as c:
             return [dict(r) for r in c.execute("SELECT * FROM signal_runs WHERE experiment_id=? ORDER BY dir", (eid,))]
@@ -481,9 +388,6 @@ class SignalResearchStore:
         if symbol:
             where = "WHERE symbol = '" + symbol.replace("'", "''") + "'"
         return read_parquet(p, limit=limit, where=where)
-
-    def signal_nulls(self, eid: str, key: str) -> pd.DataFrame:
-        return read_parquet(self._signal_dir(eid, key) / "nulls.parquet")
 
     def results(self, eid: str | None = None, **filters) -> list[dict]:
         sql = ("SELECT r.*, e.dataset, e.dataset_version, e.name AS experiment_name, e.created_at_utc, e.status AS "
@@ -574,23 +478,6 @@ class SignalResearchStore:
                    mb["code"]["signals_research_data_sha256"], at_utc=now_utc())
         self._set(new, reproduction=json.dumps(out))
         return out
-
-    # -- saved configurations ----------------------------------------------------------------------------------
-    def save_config(self, name: str, cfg: SignalExperimentConfig) -> str:
-        cid = uuid.uuid4().hex[:12]
-        with self._db() as c:
-            c.execute("INSERT INTO signal_saved_configs VALUES (?,?,?,?)", (cid, name, cfg.model_dump_json(), now_utc()))
-        return cid
-
-    def configs(self) -> list[dict]:
-        with self._db() as c:
-            rows = c.execute("SELECT * FROM signal_saved_configs ORDER BY created_at_utc DESC").fetchall()
-        return [dict(config_id=r["config_id"], name=r["name"], created_at_utc=r["created_at_utc"],
-                     config=json.loads(r["config"])) for r in rows]
-
-    def delete_config(self, cid: str) -> bool:
-        with self._db() as c:
-            return c.execute("DELETE FROM signal_saved_configs WHERE config_id=?", (cid,)).rowcount > 0
 
     # -- imports into the Strategy Library ------------------------------------------------------------------------
     def imports(self) -> list[dict]:

@@ -1,22 +1,26 @@
-// Backtesting: configure an experiment (strategy, version, parameters, universe, window inside the dataset's actual
+// New backtest: configure an experiment (strategy, version, parameters, universe, window inside the dataset's actual
 // coverage, frequency, capital, benchmark, execution assumptions), validate it, save it, launch it, or collect
 // variants into a batch of independent runs.
-import { CheckCircle2, Layers, Play, Save, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { CheckCircle2, Layers, Play, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
-import { api, ApiError, type ExecutionConfig, type ExperimentConfig, type RunDetail } from "@/api/client";
+import { api, describeError, type ExecutionConfig, type ExperimentConfig, type RunDetail } from "@/api/client";
 import {
   useConfigs, useDatasets, useDeleteConfig, useExperiments, useLaunch, useSaveConfig, useSettings, useStrategies,
-  useUniverses, useValidate,
+  useValidate,
 } from "@/api/hooks";
 import { ChoiceSelect, ExecutionEditor, Field, NumberInput, ParamsEditor } from "@/components/ConfigForm";
-import { Empty, ErrorState, Loading, PageHeader, Panel, PeriodBadge, StatusBadge } from "@/components/common";
+import { Empty, Loading, PageHeader, Panel, PeriodBadge, StatusBadge } from "@/components/common";
+import { DataWindowFields } from "@/components/DataWindow";
+import { ProblemPanel } from "@/components/Progress";
+import { SavedConfigsPanel } from "@/components/SavedConfigs";
 import { Button } from "@/components/ui/button";
-import { Input, Textarea } from "@/components/ui/primitives";
+import { Input } from "@/components/ui/primitives";
+import { applyUniverse, universeChoiceOf, type UniverseChoice } from "@/lib/dataWindow";
 import * as fmt from "@/lib/format";
+import { ptradeCompatible } from "@/lib/ptrade";
 import { Link, navigate, useLocation } from "@/lib/router";
-import { ptradeCompatible } from "@/pages/Strategies";
 
 const FALLBACK_EXEC: ExecutionConfig = {
   fill_timing: "next_open", slippage_bps: 0, commission: { per_share: 0, bps: 0, per_order: 0, minimum: 0 },
@@ -40,12 +44,9 @@ export function BacktestPage() {
   const save = useSaveConfig();
   const del = useDeleteConfig();
   const [cfg, setCfg] = useState<ExperimentConfig | null>(null);
-  const [universeMode, setUniverseMode] = useState<"named" | "custom">("named");
-  const [symbols, setSymbols] = useState("");
+  const [universe, setUniverse] = useState<UniverseChoice>({ mode: "named", symbols: "" });
   const [batch, setBatch] = useState<ExperimentConfig[]>([]);
-  const [saveName, setSaveName] = useState("");
-  const [problem, setProblem] = useState<string | null>(null);
-  const universes = useUniverses(cfg?.dataset);
+  const [problem, setProblem] = useState<ReturnType<typeof describeError> | null>(null);
 
   // initial config: from ?from=<run>, ?config=<saved id>, or defaults (?strategy=)
   useEffect(() => {
@@ -55,7 +56,7 @@ export function BacktestPage() {
     if (from) {
       api.get<RunDetail>(`/experiments/${encodeURIComponent(from)}`).then((r) => {
         load({ ...r.config, dataset_version: null, name: `${r.config.name || r.config.strategy} (copy)` });
-      }).catch((e) => setProblem(String(e)));
+      }).catch((e) => setProblem(describeError(e)));
       return;
     }
     if (saved && configs.data) {
@@ -77,40 +78,24 @@ export function BacktestPage() {
 
   function load(c: ExperimentConfig) {
     setCfg({ ...c, execution: { ...FALLBACK_EXEC, ...c.execution } });
-    if (c.universe && c.universe.length) {
-      setUniverseMode("custom");
-      setSymbols(c.universe.join(", "));
-    } else setUniverseMode("named");
+    setUniverse(universeChoiceOf(c));
   }
 
   const strat = strategies.data?.strategies.find((s) => s.id === cfg?.strategy);
-  const ds = datasets.data?.find((d) => d.id === cfg?.dataset);
-  const policy = settings.data?.policy;
-  const bounds = useMemo(() => {
-    const first = ds?.current?.first_date, last = ds?.current?.last_date;
-    const lo = [policy?.backtest_floor, first].filter(Boolean).sort().at(-1);
-    const hi = [policy?.ceiling, last].filter(Boolean).sort()[0];
-    return { lo, hi, first, last };
-  }, [ds, policy]);
-  const resolvedUniverse = universes.data?.find((u) => u.name === cfg?.universe_name)?.symbols;
 
   if (!cfg) {
-    return <div className="space-y-3"><PageHeader title="Backtesting" />{problem ? <ErrorState error={problem} /> : <Loading rows={8} />}</div>;
+    return <div className="space-y-3"><PageHeader title="New backtest" />{problem ? <ProblemPanel {...problem} /> : <Loading rows={8} />}</div>;
   }
   const set = (patch: Partial<ExperimentConfig>) => setCfg({ ...cfg, ...patch });
   const final = (): ExperimentConfig => {
-    const out: ExperimentConfig = { ...cfg };
-    if (universeMode === "custom") {
-      out.universe = symbols.split(/[\s,;]+/).map((s) => s.trim().toUpperCase()).filter(Boolean);
-      out.universe_name = null;
-    } else out.universe = null;
+    const out: ExperimentConfig = applyUniverse({ ...cfg }, universe);
     if (!out.benchmark) out.benchmark = null;
     return out;
   };
   const report = (e: unknown) => {
-    const msg = e instanceof ApiError ? e.message : String(e);
-    setProblem(msg);
-    toast.error(msg);
+    const d = describeError(e);
+    setProblem(d);
+    toast.error(d.title);
   };
   const doValidate = () => validate.mutate(final(), {
     onSuccess: (r) => { setProblem(null); toast.success(`Valid: ${r.n_symbols} symbols, warm-up ${r.warmup} bars, periods ${r.periods.join(", ")}`); },
@@ -118,19 +103,19 @@ export function BacktestPage() {
   });
   const doLaunch = () => launch.mutate([final()], { onSuccess: (ids) => navigate(`/runs/${ids[0]}`), onError: report });
   const doBatch = () => launch.mutate(batch, {
-    onSuccess: (ids) => { toast.success(`${ids.length} experiments queued`); setBatch([]); navigate("/experiments"); }, onError: report,
+    onSuccess: (ids) => { toast.success(`${ids.length} experiments queued`); setBatch([]); navigate("/experiments?kind=backtest"); }, onError: report,
   });
   const compat = strat ? ptradeCompatible(strat) : null;
 
   return (
     <div className="space-y-3">
-      <PageHeader title="Backtesting" sub="Event-driven, deterministic. Orders decided at a close fill at the next session; nothing after the decision session is visible to the strategy."
+      <PageHeader title="New backtest" sub="Event-driven, deterministic. Orders decided at a close fill at the next session; nothing after the decision session is visible to the strategy."
         actions={<>
           <Button size="sm" variant="outline" onClick={doValidate} disabled={validate.isPending}><CheckCircle2 className="size-3.5" />Validate</Button>
           <Button size="sm" variant="outline" onClick={() => { setBatch((b) => [...b, final()]); toast.info("Added to batch"); }}><Layers className="size-3.5" />Add to batch</Button>
           <Button size="sm" onClick={doLaunch} disabled={launch.isPending} data-action="launch"><Play className="size-3.5" />Launch</Button>
         </>} />
-      {problem && <ErrorState error={problem} />}
+      {problem && <ProblemPanel {...problem} />}
       <div className="grid gap-3 xl:grid-cols-[1fr_340px]">
         <div className="space-y-3">
           <Panel title="Strategy">
@@ -150,11 +135,7 @@ export function BacktestPage() {
             <div className="mt-3">{strat && <ParamsEditor schema={strat.params} value={cfg.params} onChange={(p) => set({ params: p })} />}</div>
           </Panel>
           <Panel title="Data and universe">
-            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-              <Field label="Dataset" className="md:col-span-2">
-                <ChoiceSelect value={cfg.dataset} onChange={(v) => set({ dataset: v, dataset_version: null })} aria-label="dataset"
-                  options={(datasets.data ?? []).map((d) => ({ value: d.id, label: `${d.id}${d.cached ? "" : " (not cached)"}` }))} />
-              </Field>
+            <DataWindowFields cfg={cfg} set={set} universe={universe} onUniverse={setUniverse} policy={settings.data?.policy}>
               <Field label="Frequency" hint="1w and 1mo are aggregated from daily bars (adjusted prices only).">
                 <ChoiceSelect value={cfg.frequency} onChange={(v) => set({ frequency: v as ExperimentConfig["frequency"] })} aria-label="frequency"
                   options={[{ value: "1d", label: "Daily" }, { value: "1w", label: "Weekly" }, { value: "1mo", label: "Monthly" }]} />
@@ -162,41 +143,9 @@ export function BacktestPage() {
               <Field label="Benchmark" hint="A symbol in any configured dataset (adjusted close, total return). Empty = none.">
                 <Input className="num h-8 text-xs" value={cfg.benchmark ?? ""} onChange={(e) => set({ benchmark: e.target.value.toUpperCase() || null })} aria-label="benchmark" />
               </Field>
-              <Field label="Start" hint={`Earliest: ${bounds.lo ?? "?"}`}>
-                <Input type="date" className="num h-8 text-xs" value={cfg.start} min={bounds.lo} max={bounds.hi} onChange={(e) => set({ start: e.target.value })} aria-label="start" />
-              </Field>
-              <Field label="End" hint={`Latest: ${bounds.hi ?? "?"}`}>
-                <Input type="date" className="num h-8 text-xs" value={cfg.end} min={bounds.lo} max={bounds.hi} onChange={(e) => set({ end: e.target.value })} aria-label="end" />
-              </Field>
               <Field label="Initial capital"><NumberInput value={cfg.initial_capital} min={1} onChange={(v) => set({ initial_capital: v ?? 100000 })} aria-label="capital" /></Field>
               <Field label="Seed" hint="Seeds the strategy's random generator (ctx.rng)."><NumberInput value={cfg.seed} step={1} onChange={(v) => set({ seed: Math.round(v ?? 0) })} aria-label="seed" /></Field>
-            </div>
-            <div className="mt-2 text-2xs text-muted-foreground" data-coverage>
-              {ds?.current
-                ? <>Dataset coverage <span className="num text-foreground">{ds.current.first_date} → {ds.current.last_date}</span> ({fmt.int(ds.current.n_symbols)} symbols, version <span className="num">{fmt.bytesHash(ds.current.version, 8)}</span>). Selectable window <span className="num text-foreground">{bounds.lo} → {bounds.hi}</span>; bars before the start are loaded only as warm-up.</>
-                : <>Dataset not cached yet: <Link to={`/data/${cfg.dataset}`} className="text-primary underline">ingest it</Link> to see its coverage.</>}
-            </div>
-            <div className="mt-3 grid gap-2 md:grid-cols-[200px_1fr]">
-              <Field label="Universe">
-                <ChoiceSelect value={universeMode} onChange={(v) => setUniverseMode(v as "named" | "custom")} aria-label="universe mode"
-                  options={[{ value: "named", label: "Named universe" }, { value: "custom", label: "Custom symbols" }]} />
-              </Field>
-              {universeMode === "named" ? (
-                <Field label="Named universe">
-                  <ChoiceSelect value={cfg.universe_name ?? "all"} onChange={(v) => set({ universe_name: v })} aria-label="universe"
-                    options={(universes.data ?? [{ name: "all" }]).map((u) => ({ value: u.name, label: `${u.name}${u.symbols ? ` (${u.symbols.length})` : ""}` }))} />
-                </Field>
-              ) : (
-                <Field label="Symbols (comma or space separated)">
-                  <Textarea className="num min-h-14 text-xs" value={symbols} onChange={(e) => setSymbols(e.target.value)} aria-label="symbols" />
-                </Field>
-              )}
-            </div>
-            {universeMode === "named" && resolvedUniverse && (
-              <div className="mt-1 truncate text-2xs text-muted-foreground" title={resolvedUniverse.join(", ")}>
-                {resolvedUniverse.length} symbols in {cfg.dataset}: {resolvedUniverse.slice(0, 30).join(", ")}{resolvedUniverse.length > 30 ? " …" : ""}
-              </div>
-            )}
+            </DataWindowFields>
           </Panel>
           <Panel title="Execution assumptions" info="Applied identically in backtests and on the forward host.">
             <ExecutionEditor value={cfg.execution} onChange={(e) => set({ execution: e })} />
@@ -215,28 +164,11 @@ export function BacktestPage() {
               </ul>
             )}
           </Panel>
-          <Panel title="Saved configurations">
-            <div className="mb-2 flex gap-1.5">
-              <Input className="h-7 text-xs" placeholder="Name" value={saveName} onChange={(e) => setSaveName(e.target.value)} aria-label="config name" />
-              <Button size="sm" variant="outline" className="h-7" disabled={!saveName || save.isPending}
-                onClick={() => save.mutate({ name: saveName, config: final() }, { onSuccess: () => { toast.success("Saved"); setSaveName(""); }, onError: report })}>
-                <Save className="size-3.5" />Save
-              </Button>
-            </div>
-            {configs.isLoading ? <Loading /> : (configs.data ?? []).length === 0 ? <div className="text-xs text-muted-foreground">None saved.</div> : (
-              <ul className="space-y-1">
-                {configs.data!.map((c) => (
-                  <li key={c.config_id} className="flex items-center gap-2 rounded border px-2 py-1 text-xs">
-                    <button className="min-w-0 flex-1 truncate text-left hover:text-primary" onClick={() => load(c.config)} title="Load">
-                      {c.name} <span className="text-2xs text-muted-foreground">{c.config.strategy}</span>
-                    </button>
-                    <Button size="icon-xs" variant="ghost" aria-label="delete" onClick={() => del.mutate(c.config_id)}><Trash2 /></Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Panel>
-          <Panel title="Recent runs" actions={<Link to="/experiments" className="text-xs text-primary hover:underline">All</Link>}>
+          {configs.isLoading ? <Loading /> : (
+            <SavedConfigsPanel configs={configs.data} onLoad={load} onDelete={(id) => del.mutate(id)} onError={report}
+              onSave={(name) => save.mutateAsync({ name, config: final() })} saving={save.isPending} describe={(c) => c.strategy} />
+          )}
+          <Panel title="Recent runs" actions={<Link to="/experiments?kind=backtest" className="text-xs text-primary hover:underline">All</Link>}>
             {(runs.data ?? []).length === 0 ? <Empty title="No runs yet" /> : (
               <ul className="space-y-1">
                 {runs.data!.slice(0, 8).map((r) => (

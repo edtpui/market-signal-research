@@ -4,11 +4,11 @@ import { match } from "@/lib/router";
 import { cellColor, fmtMetric } from "@/pages/entryexit/common";
 
 describe("entry-exit routes", () => {
-  it("maps every Entry-Exit Lab page", () => {
-    expect(match("/entry-exit")).toEqual({ page: "entryexit", view: "library" });
+  it("maps every entry-exit page, and the old list paths onto their new places", () => {
     expect(match("/entry-exit/new")).toEqual({ page: "entryexit", view: "new" });
-    expect(match("/entry-exit/leaderboards")).toEqual({ page: "entryexit", view: "leaderboards" });
-    expect(match("/entry-exit/history")).toEqual({ page: "entryexit", view: "history" });
+    expect(match("/entry-exit")).toEqual({ page: "library", tab: "exits" });
+    expect(match("/entry-exit/leaderboards")).toEqual({ page: "results", view: "leaderboards" });
+    expect(match("/entry-exit/history")).toEqual({ page: "experiments", kind: "entry-exit" });
     expect(match("/entry-exit/experiments/ee-1")).toEqual({ page: "entryexit", view: "experiment", id: "ee-1" });
     expect(match("/entry-exit/experiments/ee-1/cells/e000_x003")).toEqual({ page: "entryexit", view: "cell", id: "ee-1", cell: "e000_x003" });
   });
