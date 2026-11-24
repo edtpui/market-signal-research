@@ -5,8 +5,7 @@
 # web/dist changes on the host take effect with `docker compose restart`.
 #
 # State (var/: catalog.db with the append-only ledgers, experiments, dataset cache, forward mock host) lives in the
-# named volume `market-signal-research-var`, seeded once from the host's var/ on 2026-11-16. The host var/ is no
-# longer written to; do not run the host server (scripts/sl.sh serve) for new work, its state would diverge.
+# named volume `market-signal-research-var`.
 name: market-signal-research
 
 services:
@@ -19,7 +18,7 @@ services:
     init: true
     restart: unless-stopped
     ports:
-      - "8070:8070"   # all host interfaces (user request 2026-11-16); the API has no authentication: LAN-trusted only
+      - "127.0.0.1:8070:8070"   # localhost only: the API has no authentication
     volumes:
       - .:/workspace/strategy_lab:ro
       - ../data:/workspace/data:ro

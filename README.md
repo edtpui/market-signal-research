@@ -6,8 +6,9 @@ ptrade bundle, its operator steps and the write-once imported strategy modules r
 
 Historical backtesting and forward paper testing on one engine. Built in the ptrade web terminal's design (React,
 Tailwind, shadcn/ui, lightweight-charts) over a FastAPI backend. Dev-only project in Lab: there is no
-broker, no live order and no access to HOLDOUT data. The paper-trading system in `C:\AI\Workspace\trading\paper_trading`
-remains the forward execution authority; Market Signal Research exports to it and reads from it.
+broker, no live order and no access to HOLDOUT data. Forward execution lives in ptrade, a separate private
+paper-trading system that is not part of this repository; Market Signal Research exports strategy bundles
+to it and reads results back (see `docs/PTRADE_INTEGRATION.md`).
 
 - Architecture and the audit behind it: `docs/ARCHITECTURE.md`
 - Forward integration with ptrade: `docs/PTRADE_INTEGRATION.md`
@@ -18,8 +19,17 @@ remains the forward execution authority; Market Signal Research exports to it an
   `docs/ENTRY_EXIT_RESEARCH.md`
 
 ## Run
-Interpreter: `../.venv-research` (Python 3.14.7, numpy/pandas/duckdb/fastapi/pydantic/uvicorn already
-installed). Nothing is installed globally.
+Requires Python 3.12 or newer, plus Node.js for the web UI.
+
+```
+python -m venv .venv
+.venv\Scripts\activate        # Windows; on macOS/Linux: source .venv/bin/activate
+pip install -e ".[test]"
+cd web && npm install && npm run build && cd ..
+```
+
+Market data is not included in this repository. The dataset paths in `config/settings.toml` point at a
+data folder beside the repo; the test suite and the synthetic data providers run without it.
 
 ```
 bash scripts/run_tests.sh                       # 239 Python tests (synthetic fixtures; 3 read the workspace data read-only)
@@ -36,16 +46,14 @@ Without bash: `<python> scripts/serve.py serve --port 8070`.
 
 ### Container (the running instance since 2026-11-16)
 ```
-docker compose up -d                            # API + UI at http://<host ip>:8070 (container market-signal-research; no auth)
+docker compose up -d                            # API + UI at http://127.0.0.1:8070 (container market-signal-research; no auth, localhost only)
 docker compose restart                          # pick up host changes to src/, config/ or web/dist
 docker compose exec app python -m strategy_lab ingest us_core    # any CLI command, against the container's state
 docker compose build                            # only after changing docker/Dockerfile
 ```
-The image (`docker/Dockerfile`, Python 3.14 on Linux, the dependency versions of `../.venv-research`) holds no
-project code: this folder and `../data` are mounted read-only. `var/` is the named volume
-`market-signal-research-var`, seeded from the host's `var/` on 2026-11-16 and owned by the container's non-root
-user (uid 1000). The host `var/` is a frozen copy from that date: run new work in the container, not with
-`sl.sh serve` on the host, or the two catalogs diverge. Tests against the image, with no state volume:
+The image (`docker/Dockerfile`, Python 3.14 on Linux) holds no project code: this folder and the sibling
+`data` folder are mounted read-only. `var/` is the named volume `market-signal-research-var`, owned by the
+container's non-root user (uid 1000). Tests against the image, with no state volume:
 `docker run --rm -v <this folder>:/workspace/strategy_lab:ro -v <../data>:/workspace/data:ro
 market-signal-research:0.1.0 python -m pytest tests -q`.
 
@@ -98,3 +106,7 @@ var/                      generated, gitignored: cache/ (datasets), experiments/
   2025-12-31 (HOLDOUT starts 2026-01-01). Configuration can lower the ceiling but never raise it.
 - Results are labelled with the research periods they overlap (IS 2019-22, OOS 2023-25) and with EXPLORATORY.
 - Universes are today's lists, so results carry survivorship bias.
+
+## License
+
+MIT. See `LICENSE`.
