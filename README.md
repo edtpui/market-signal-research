@@ -10,6 +10,10 @@ broker, no live order and no access to HOLDOUT data. Forward execution lives in 
 paper-trading system that is not part of this repository; Market Signal Research exports strategy bundles
 to it and reads results back (see `docs/PTRADE_INTEGRATION.md`).
 
+![Signal rankings: excess return vs matched random stocks, with 95% confidence intervals](docs/images/signal-rankings.png)
+
+*Signal Research Lab results: the top 16 entry signals ranked by excess return against matched random entries.*
+
 - Architecture and the audit behind it: `docs/ARCHITECTURE.md`
 - Forward integration with ptrade: `docs/PTRADE_INTEGRATION.md`
 - Writing strategies: `docs/STRATEGY_API.md`
